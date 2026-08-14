@@ -17,7 +17,9 @@ if(APPLE)
 endif()
 
 juce_add_plugin(Folie
-    COMPANY_NAME "EVS"
+    # Display name must match Keepsake's so both EVS plugins group under one
+    # manufacturer folder in DAW menus.
+    COMPANY_NAME "Elan Vital Studios"
     BUNDLE_ID com.evs.folie
     # 4-char codes are immutable once builds are in real DAW projects.
     PLUGIN_MANUFACTURER_CODE Evsy
