@@ -60,6 +60,9 @@ private:
         std::atomic<float>* blend = nullptr;
         std::atomic<float>* width = nullptr;
         std::atomic<float>* octave = nullptr;
+        std::atomic<float>* srcSawLevel = nullptr;
+        std::atomic<float>* srcNoiseLevel = nullptr;
+        std::atomic<float>* srcNoiseType = nullptr;
         std::atomic<float>* fbGain = nullptr;
         std::atomic<float>* fbKeytrack = nullptr;
         std::atomic<float>* fbTune = nullptr;

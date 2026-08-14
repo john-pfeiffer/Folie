@@ -1,5 +1,6 @@
 #pragma once
 
+#include "NoiseSource.h"
 #include "SupersawOscillator.h"
 #include "TunedFeedbackLoop.h"
 
@@ -12,6 +13,11 @@ struct VoiceParams
     float blend      = 0.6f;    // 0..1
     float width      = 0.8f;    // 0..1
     int   octave     = 0;       // -2..+2
+
+    // Source mixer (sample exciter arrives in a later stage)
+    float srcSawLevel   = 1.0f; // 0..1
+    float srcNoiseLevel = 0.0f; // 0..1
+    bool  srcNoisePink  = false;
 
     // Defaults mirror the parameter-layout defaults ("showcase" tuning).
     float fbGain      = 0.75f;  // 0..1.1 — past 1.0 is "past the edge"
@@ -74,6 +80,7 @@ public:
     {
         sr = sampleRate;
         rng.setSeed ((juce::int64) 0x466f6c69 + voiceIndex);
+        noise.seed (0x9E3779B9u * (juce::uint32) (voiceIndex + 1));
         osc.prepare (sampleRate);
         loop.prepare (sampleRate);
         env1.setSampleRate (sampleRate);
@@ -246,6 +253,20 @@ public:
             {
                 float l, r;
                 osc.processSample (l, r);
+                l *= params.srcSawLevel;
+                r *= params.srcSawLevel;
+
+                // Mono noise into both channels BEFORE the loop's mono sum,
+                // so it excites the loop like the saws do (noise + high
+                // feedback + damping = the classic Karplus-Strong pluck).
+                // 0.4: rough loudness match against the normalized saw stack.
+                if (params.srcNoiseLevel > 0.0f)
+                {
+                    const float nz = noise.process (params.srcNoisePink)
+                                     * params.srcNoiseLevel * 0.4f;
+                    l += nz;
+                    r += nz;
+                }
 
                 // ENV2 adds on top of the knob (spec: base + amount * ADSR),
                 // clamped to the knob's own 110% ceiling.
@@ -289,6 +310,7 @@ private:
     juce::Random rng;
 
     SupersawOscillator osc;
+    NoiseSource noise;
     TunedFeedbackLoop loop;
     juce::ADSR env1, env2, env3;
     juce::SmoothedValue<float> fbBaseSmoothed { 0.0f };

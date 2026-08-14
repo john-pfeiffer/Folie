@@ -32,6 +32,9 @@ private:
     SectionPanel oscSection { "OSCILLATOR" };
     Knob sawCount, detune, blend, width, octave;
 
+    SectionPanel sourceSection { "SOURCE" };
+    Knob sawLevel, noiseLevel, noiseType;
+
     SectionPanel loopSection { "FEEDBACK LOOP" };
     Knob fbGain, fbKeytrack, fbTune;
 

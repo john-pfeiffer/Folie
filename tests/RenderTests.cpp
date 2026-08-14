@@ -126,6 +126,39 @@ float centsBetween (float f1, float f2)
     return 1200.0f * std::log2 (f1 / f2);
 }
 
+// Pitch of comb-filtered/noisy signals: normalized autocorrelation over the
+// last second, peak lag in the 50 Hz..2 kHz range. Robust where the FFT
+// "dominant bin" fluctuates (e.g. sustained noise through the tuned loop).
+float autocorrelationPitch (const juce::AudioBuffer<float>& b)
+{
+    const int n = juce::jmin (b.getNumSamples(), (int) kSampleRate);
+    const float* x = b.getReadPointer (0) + (b.getNumSamples() - n);
+
+    const int minLag = (int) (kSampleRate / 2000.0);
+    const int maxLag = (int) (kSampleRate / 50.0);
+
+    float bestScore = -1.0f;
+    int bestLag = minLag;
+
+    for (int lag = minLag; lag <= maxLag; ++lag)
+    {
+        float num = 0.0f, den = 0.0f;
+        for (int i = 0; i < n - lag; i += 2) // stride 2: same estimate, half cost
+        {
+            num += x[i] * x[i + lag];
+            den += x[i] * x[i];
+        }
+        const float score = den > 0.0f ? num / den : 0.0f;
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestLag = lag;
+        }
+    }
+
+    return (float) kSampleRate / (float) bestLag;
+}
+
 EngineParams defaultParams()
 {
     EngineParams p;
@@ -559,6 +592,44 @@ void testModulesSoloAndAllOn()
     }
 }
 
+// The classic Karplus-Strong proof: no saws at all, just noise into a hot
+// damped loop — the output must ring at the played note.
+void testNoiseKarplusPluck()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.srcSawLevel = 0.0f;
+    p.voice.srcNoiseLevel = 1.0f;
+    p.voice.fbGain = 1.02f;
+    p.voice.fbCutoff = 2500.0f;
+    p.voice.fbDriveDb = 0.0f;
+    p.voice.env1Sustain = 1.0f;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) }, // A2
+    };
+    auto out = render (engine, events, 3.0);
+
+    const float pitch = autocorrelationPitch (out);
+    const float cents = centsBetween (pitch, 110.0f);
+    std::printf ("      noise pluck: autocorr pitch %.2f Hz (%.1f cents from A2)\n", pitch, cents);
+    check (std::abs (cents) < 50.0f, "noise pluck: noise-only source rings at the note");
+    check (allFinite (out, 20.0f), "noise pluck: finite");
+
+    // And pink mode stays sane too.
+    p.voice.srcNoisePink = true;
+    SynthEngine pinkEngine;
+    pinkEngine.prepare (kSampleRate);
+    pinkEngine.setParams (p);
+    auto pinkOut = render (pinkEngine, events, 2.0);
+    check (allFinite (pinkOut, 20.0f), "noise pluck: pink mode finite");
+    check (pinkOut.getMagnitude (0, pinkOut.getNumSamples()) > 0.01f,
+           "noise pluck: pink mode produces signal");
+}
+
 // Order sanitizing: any junk becomes a valid permutation; round-trips hold.
 void testLoopOrderSanitizer()
 {
@@ -725,6 +796,7 @@ int main()
     testReorderMidRender();
     testEchoKeepsLoopPitch();
     testModulesSoloAndAllOn();
+    testNoiseKarplusPluck();
     testVoiceModes();
     testSafetyClip();
 

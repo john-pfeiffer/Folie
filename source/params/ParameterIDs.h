@@ -20,6 +20,11 @@ inline constexpr auto fbCutoff     = "fbCutoff";
 inline constexpr auto fbReso       = "fbReso";
 inline constexpr auto fbDrive      = "fbDrive";
 
+// Source mixer
+inline constexpr auto srcSawLevel   = "srcSawLevel";
+inline constexpr auto srcNoiseLevel = "srcNoiseLevel";
+inline constexpr auto srcNoiseType  = "srcNoiseType";
+
 // Loop FX rack (in-loop modules; enables are the automatable dimension —
 // module ORDER is the loopOrder state property, not a parameter)
 inline constexpr auto fxFilterOn = "fxFilterOn";

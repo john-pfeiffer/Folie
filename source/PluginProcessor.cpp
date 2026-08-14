@@ -13,6 +13,9 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.blend     = apvts.getRawParameterValue (ParamIDs::oscBlend);
     raw.width     = apvts.getRawParameterValue (ParamIDs::oscWidth);
     raw.octave    = apvts.getRawParameterValue (ParamIDs::oscOctave);
+    raw.srcSawLevel   = apvts.getRawParameterValue (ParamIDs::srcSawLevel);
+    raw.srcNoiseLevel = apvts.getRawParameterValue (ParamIDs::srcNoiseLevel);
+    raw.srcNoiseType  = apvts.getRawParameterValue (ParamIDs::srcNoiseType);
     raw.fbGain       = apvts.getRawParameterValue (ParamIDs::fbGain);
     raw.fbKeytrack   = apvts.getRawParameterValue (ParamIDs::fbKeytrack);
     raw.fbTune       = apvts.getRawParameterValue (ParamIDs::fbTune);
@@ -63,6 +66,9 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.blend         = raw.blend->load() * 0.01f;
     p.voice.width         = raw.width->load() * 0.01f;
     p.voice.octave        = (int) raw.octave->load();
+    p.voice.srcSawLevel   = raw.srcSawLevel->load() * 0.01f;
+    p.voice.srcNoiseLevel = raw.srcNoiseLevel->load() * 0.01f;
+    p.voice.srcNoisePink  = raw.srcNoiseType->load() > 0.5f;
     p.voice.fbGain        = raw.fbGain->load() * 0.01f;
     p.voice.fbKeytrack    = raw.fbKeytrack->load() * 0.01f;
     p.voice.fbTuneSemis   = raw.fbTune->load();

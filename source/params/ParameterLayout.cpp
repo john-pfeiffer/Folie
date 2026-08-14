@@ -113,6 +113,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 
     // New parameters added after the first builds use versionHint 2 so hosts
     // keep stable AU/VST3 parameter ordering across versions.
+    auto src = std::make_unique<Group> ("src", "Source", "|");
+    src->addChild (
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::srcSawLevel, 2 }, "Saw Level",
+                               percentRange(), 100.0f, percentAttributes()),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::srcNoiseLevel, 2 }, "Noise Level",
+                               percentRange(), 0.0f, percentAttributes()),
+        std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::srcNoiseType, 2 }, "Noise Type",
+            juce::StringArray { "White", "Pink" }, 0));
+
     auto rack = std::make_unique<Group> ("rack", "Loop FX Rack", "|");
     rack->addChild (
         std::make_unique<juce::AudioParameterBool> (
@@ -221,6 +231,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                                           : juce::String (v, 1) + " dB";
                                    })));
 
-    return { std::move (osc), std::move (loop), std::move (rack), std::move (env1),
-             std::move (env2), std::move (env3), std::move (global) };
+    return { std::move (osc), std::move (src), std::move (loop), std::move (rack),
+             std::move (env1), std::move (env2), std::move (env3), std::move (global) };
 }
