@@ -16,6 +16,9 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.srcSawLevel   = apvts.getRawParameterValue (ParamIDs::srcSawLevel);
     raw.srcNoiseLevel = apvts.getRawParameterValue (ParamIDs::srcNoiseLevel);
     raw.srcNoiseType  = apvts.getRawParameterValue (ParamIDs::srcNoiseType);
+    raw.srcSampleLevel = apvts.getRawParameterValue (ParamIDs::srcSampleLevel);
+    raw.srcSampleRoot  = apvts.getRawParameterValue (ParamIDs::srcSampleRoot);
+    raw.srcSampleLoop  = apvts.getRawParameterValue (ParamIDs::srcSampleLoop);
     raw.fbGain       = apvts.getRawParameterValue (ParamIDs::fbGain);
     raw.fbKeytrack   = apvts.getRawParameterValue (ParamIDs::fbKeytrack);
     raw.fbTune       = apvts.getRawParameterValue (ParamIDs::fbTune);
@@ -69,6 +72,10 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.srcSawLevel   = raw.srcSawLevel->load() * 0.01f;
     p.voice.srcNoiseLevel = raw.srcNoiseLevel->load() * 0.01f;
     p.voice.srcNoisePink  = raw.srcNoiseType->load() > 0.5f;
+    p.voice.srcSampleLevel = raw.srcSampleLevel->load() * 0.01f;
+    p.voice.srcSampleRoot  = (int) raw.srcSampleRoot->load();
+    p.voice.srcSampleLoop  = raw.srcSampleLoop->load() > 0.5f;
+    p.voice.sample         = activeSample.load (std::memory_order_acquire);
     p.voice.fbGain        = raw.fbGain->load() * 0.01f;
     p.voice.fbKeytrack    = raw.fbKeytrack->load() * 0.01f;
     p.voice.fbTuneSemis   = raw.fbTune->load();
@@ -131,6 +138,7 @@ bool FolieAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 void FolieAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    blockCounter.fetch_add (1, std::memory_order_release);
 
     buffer.clear();
     engine.setParams (gatherParams());
@@ -170,8 +178,93 @@ void FolieAudioProcessor::setStateInformation (const void* data, int sizeInBytes
             const auto order = LoopOrder::fromString (
                 apvts.state.getProperty ("loopOrder", LoopOrder::toString (LoopOrder::canonical)));
             packedOrder.store (LoopOrder::pack (order), std::memory_order_release);
+
+            const juce::String base64 = apvts.state.getProperty ("sampleData", juce::String());
+            if (base64.isNotEmpty())
+                publishSample (SampleData::fromBase64 (
+                                   base64, apvts.state.getProperty ("sampleName", "sample")),
+                               false);
+            else
+                publishSample (nullptr, false);
         }
     }
+}
+
+bool FolieAudioProcessor::loadSampleFromFile (const juce::File& file)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    if (reader == nullptr)
+        return false;
+
+    const auto maxLen = (juce::int64) (SampleData::maxSeconds * reader->sampleRate);
+    const int numSamples = (int) juce::jmin ((juce::int64) reader->lengthInSamples, maxLen);
+    if (numSamples <= 0)
+        return false;
+
+    juce::AudioBuffer<float> fileBuffer ((int) reader->numChannels, numSamples);
+    if (! reader->read (&fileBuffer, 0, numSamples, 0, true, reader->numChannels > 1))
+        return false;
+
+    // Downmix to mono — the exciter feeds a mono per-voice loop.
+    juce::AudioBuffer<float> mono (1, numSamples);
+    mono.clear();
+    const float gain = 1.0f / (float) fileBuffer.getNumChannels();
+    for (int ch = 0; ch < fileBuffer.getNumChannels(); ++ch)
+        mono.addFrom (0, 0, fileBuffer, ch, 0, numSamples, gain);
+
+    auto data = SampleData::fromBuffer (std::move (mono), reader->sampleRate,
+                                        file.getFileNameWithoutExtension());
+    if (data == nullptr)
+        return false;
+
+    publishSample (std::move (data), true);
+    return true;
+}
+
+juce::String FolieAudioProcessor::getSampleName() const
+{
+    return apvts.state.getProperty ("sampleName", juce::String());
+}
+
+void FolieAudioProcessor::publishSample (std::unique_ptr<SampleData> newSample,
+                                         bool updateStateProperties)
+{
+    if (updateStateProperties)
+    {
+        if (newSample != nullptr)
+        {
+            apvts.state.setProperty ("sampleData", newSample->base64, nullptr);
+            apvts.state.setProperty ("sampleRate", newSample->sourceRate, nullptr);
+            apvts.state.setProperty ("sampleName", newSample->name, nullptr);
+        }
+        else
+        {
+            apvts.state.removeProperty ("sampleData", nullptr);
+            apvts.state.removeProperty ("sampleRate", nullptr);
+            apvts.state.removeProperty ("sampleName", nullptr);
+        }
+    }
+
+    activeSample.store (newSample.get(), std::memory_order_release);
+    if (currentSample != nullptr)
+        retiredSamples.emplace_back (std::move (currentSample),
+                                     blockCounter.load (std::memory_order_acquire));
+    currentSample = std::move (newSample);
+    purgeRetiredSamples();
+}
+
+void FolieAudioProcessor::purgeRetiredSamples()
+{
+    // Free retired clips only once the audio thread has provably moved past
+    // any block that could still hold the old pointer snapshot.
+    const auto now = blockCounter.load (std::memory_order_acquire);
+    retiredSamples.erase (
+        std::remove_if (retiredSamples.begin(), retiredSamples.end(),
+                        [now] (const auto& entry) { return now >= entry.second + 2; }),
+        retiredSamples.end());
 }
 
 LoopOrder::Order FolieAudioProcessor::getLoopOrder() const

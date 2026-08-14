@@ -4,6 +4,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include "dsp/SampleData.h"
 #include "dsp/SoftClip.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/TunedFeedbackLoop.h"
@@ -762,6 +763,126 @@ void testVoiceModes()
     }
 }
 
+std::unique_ptr<SampleData> makeSineSample (float hz, double rate, double seconds)
+{
+    juce::AudioBuffer<float> buf (1, (int) (rate * seconds));
+    auto* d = buf.getWritePointer (0);
+    for (int i = 0; i < buf.getNumSamples(); ++i)
+        d[i] = 0.5f * std::sin (juce::MathConstants<float>::twoPi * hz * (float) i / (float) rate);
+    return SampleData::fromBuffer (std::move (buf), rate, "test-sine");
+}
+
+// FLAC/Base64 codec round-trip within 24-bit quantization.
+void testSampleStateRoundTrip()
+{
+    auto original = makeSineSample (440.0f, 44100.0, 1.0);
+    check (original != nullptr && original->base64.isNotEmpty(),
+           "sample codec: encodes to base64 at load");
+
+    auto decoded = SampleData::fromBase64 (original->base64, "test-sine");
+    check (decoded != nullptr, "sample codec: decodes from base64");
+    if (decoded == nullptr)
+        return;
+
+    check (decoded->mono.getNumSamples() == original->mono.getNumSamples()
+               && juce::approximatelyEqual (decoded->sourceRate, original->sourceRate),
+           "sample codec: length and rate survive");
+
+    float maxErr = 0.0f;
+    for (int i = 0; i < original->mono.getNumSamples(); ++i)
+        maxErr = juce::jmax (maxErr, std::abs (original->mono.getSample (0, i)
+                                               - decoded->mono.getSample (0, i)));
+    std::printf ("      sample codec: max round-trip error %.2e\n", maxErr);
+    check (maxErr < 1.0e-4f, "sample codec: lossless within 24-bit quantization");
+}
+
+// A 440 Hz clip rooted at A4 must play back at 220 Hz on A3 (repitch follows
+// the note), with saws and noise silent.
+void testSampleExciterRepitch()
+{
+    auto clip = makeSineSample (440.0f, 44100.0, 2.0); // non-host rate on purpose
+
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.srcSawLevel = 0.0f;
+    p.voice.fbGain = 0.0f;
+    p.voice.srcSampleLevel = 1.0f;
+    p.voice.srcSampleRoot = 69; // A4
+    p.voice.srcSampleLoop = true;
+    p.voice.sample = clip.get();
+    p.voice.env1Sustain = 1.0f;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 57, 0.9f) }, // A3
+    };
+    auto out = render (engine, events, 2.0);
+
+    const float peak = dominantFrequency (out, 1.0);
+    const float cents = centsBetween (peak, 220.0f);
+    std::printf ("      sample repitch: dominant %.2f Hz (%.1f cents from A3)\n", peak, cents);
+    check (std::abs (cents) < 30.0f, "sample exciter: clip repitched to the played note");
+    check (allFinite (out, 4.0f), "sample exciter: finite");
+
+    // One-shot mode goes silent after the (repitched) clip ends.
+    p.voice.srcSampleLoop = false;
+    SynthEngine oneShot;
+    oneShot.prepare (kSampleRate);
+    oneShot.setParams (p);
+    auto shot = render (oneShot, events, 6.0);
+    check (rmsOfTail (shot, 1.0) < juce::Decibels::decibelsToGain (-60.0f),
+           "sample exciter: one-shot ends silent");
+}
+
+// Swapping the active sample pointer between blocks while voices render must
+// stay finite (mirrors the processor's publish/retire scheme; the retired
+// clip stays alive here just as it does there).
+void testSampleSwapWhileRendering()
+{
+    auto clipA = makeSineSample (330.0f, 48000.0, 0.5);
+    auto clipB = makeSineSample (523.0f, 22050.0, 0.5);
+
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.srcSampleLevel = 1.0f;
+    p.voice.srcSampleLoop = true;
+    p.voice.fbGain = 1.0f;
+    p.voice.env1Sustain = 1.0f;
+
+    const int totalSamples = (int) kSampleRate * 3;
+    juce::AudioBuffer<float> out (2, totalSamples);
+    out.clear();
+    juce::AudioBuffer<float> block (2, kBlockSize);
+
+    int blockIndex = 0;
+    for (int start = 0; start < totalSamples; start += kBlockSize)
+    {
+        p.voice.sample = (blockIndex / 16) % 3 == 0 ? clipA.get()
+                        : (blockIndex / 16) % 3 == 1 ? clipB.get()
+                                                     : nullptr;
+        ++blockIndex;
+        engine.setParams (p);
+
+        const int n = juce::jmin (kBlockSize, totalSamples - start);
+        juce::MidiBuffer midi;
+        if (start == 0)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 48, 0.9f), 0);
+
+        block.setSize (2, n, false, false, true);
+        block.clear();
+        engine.renderBlock (block, midi);
+        for (int ch = 0; ch < 2; ++ch)
+            out.copyFrom (ch, start, block, ch, 0, n);
+    }
+
+    check (allFinite (out, 20.0f), "sample swap: alternating clips mid-render stays finite");
+    check (out.getMagnitude (0, out.getNumSamples()) > 0.01f, "sample swap: produces signal");
+}
+
 // The fixed output soft-clip: bit-exact below the -1 dBFS knee, bounded below
 // 0 dBFS for any input.
 void testSafetyClip()
@@ -797,6 +918,9 @@ int main()
     testEchoKeepsLoopPitch();
     testModulesSoloAndAllOn();
     testNoiseKarplusPluck();
+    testSampleStateRoundTrip();
+    testSampleExciterRepitch();
+    testSampleSwapWhileRendering();
     testVoiceModes();
     testSafetyClip();
 

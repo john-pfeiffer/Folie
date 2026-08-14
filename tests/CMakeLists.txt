@@ -12,6 +12,7 @@ target_compile_definitions(FolieTests PRIVATE
 
 target_link_libraries(FolieTests PRIVATE
     juce::juce_dsp
+    juce::juce_audio_formats
     juce::juce_audio_basics
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)

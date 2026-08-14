@@ -24,6 +24,9 @@ inline constexpr auto fbDrive      = "fbDrive";
 inline constexpr auto srcSawLevel   = "srcSawLevel";
 inline constexpr auto srcNoiseLevel = "srcNoiseLevel";
 inline constexpr auto srcNoiseType  = "srcNoiseType";
+inline constexpr auto srcSampleLevel = "srcSampleLevel";
+inline constexpr auto srcSampleRoot  = "srcSampleRoot";
+inline constexpr auto srcSampleLoop  = "srcSampleLoop";
 
 // Loop FX rack (in-loop modules; enables are the automatable dimension —
 // module ORDER is the loopOrder state property, not a parameter)

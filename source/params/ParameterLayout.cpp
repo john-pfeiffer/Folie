@@ -121,7 +121,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                percentRange(), 0.0f, percentAttributes()),
         std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID { ParamIDs::srcNoiseType, 2 }, "Noise Type",
-            juce::StringArray { "White", "Pink" }, 0));
+            juce::StringArray { "White", "Pink" }, 0),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::srcSampleLevel, 2 }, "Sample Level",
+                               percentRange(), 0.0f, percentAttributes()),
+        std::make_unique<API> (juce::ParameterID { ParamIDs::srcSampleRoot, 2 }, "Sample Root",
+                               24, 96, 60,
+                               juce::AudioParameterIntAttributes{}
+                                   .withStringFromValueFunction ([] (int v, int)
+                                   { return juce::MidiMessage::getMidiNoteName (v, true, true, 3); })),
+        std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { ParamIDs::srcSampleLoop, 2 }, "Sample Loop", false));
 
     auto rack = std::make_unique<Group> ("rack", "Loop FX Rack", "|");
     rack->addChild (

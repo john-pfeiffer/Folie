@@ -11,6 +11,10 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
       sawLevel (p.apvts, ParamIDs::srcSawLevel),
       noiseLevel (p.apvts, ParamIDs::srcNoiseLevel),
       noiseType (p.apvts, ParamIDs::srcNoiseType),
+      sampleLevel (p.apvts, ParamIDs::srcSampleLevel),
+      sampleRoot (p.apvts, ParamIDs::srcSampleRoot),
+      sampleLoop (p.apvts, ParamIDs::srcSampleLoop),
+      sampleLoader (p),
       fbGain (p.apvts, ParamIDs::fbGain),
       fbKeytrack (p.apvts, ParamIDs::fbKeytrack),
       fbTune (p.apvts, ParamIDs::fbTune),
@@ -54,6 +58,10 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     sourceSection.addItem (sawLevel);
     sourceSection.addItem (noiseLevel);
     sourceSection.addItem (noiseType);
+    sourceSection.addItem (sampleLevel);
+    sourceSection.addItem (sampleRoot);
+    sourceSection.addItem (sampleLoop);
+    sourceSection.addItem (sampleLoader);
     addAndMakeVisible (sourceSection);
 
     loopSection.addItem (fbGain);
@@ -140,10 +148,10 @@ void FolieAudioProcessorEditor::resized()
 
     const int rowHeight = (area.getHeight() - 16) / 4;
 
-    // Row 1: oscillator + source mixer + loop core side by side.
+    // Row 1: oscillator + source mixer + loop core side by side (5:7:3).
     auto row1 = area.removeFromTop (rowHeight);
-    oscSection.setBounds (row1.removeFromLeft (row1.getWidth() * 5 / 11));
-    sourceSection.setBounds (row1.removeFromLeft (row1.getWidth() * 3 / 6));
+    oscSection.setBounds (row1.removeFromLeft (row1.getWidth() * 5 / 15));
+    sourceSection.setBounds (row1.removeFromLeft (row1.getWidth() * 7 / 10));
     loopSection.setBounds (row1);
 
     // Row 2: the rack, in loopOrder order.

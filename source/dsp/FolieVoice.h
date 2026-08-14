@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NoiseSource.h"
+#include "SampleData.h"
 #include "SupersawOscillator.h"
 #include "TunedFeedbackLoop.h"
 
@@ -14,10 +15,16 @@ struct VoiceParams
     float width      = 0.8f;    // 0..1
     int   octave     = 0;       // -2..+2
 
-    // Source mixer (sample exciter arrives in a later stage)
+    // Source mixer
     float srcSawLevel   = 1.0f; // 0..1
     float srcNoiseLevel = 0.0f; // 0..1
     bool  srcNoisePink  = false;
+    float srcSampleLevel = 0.0f; // 0..1
+    int   srcSampleRoot  = 60;   // MIDI note the clip plays back unpitched at
+    bool  srcSampleLoop  = false;
+    // Snapshot taken once per block by the processor; lifetime guaranteed by
+    // its publish/retire scheme.
+    const SampleData* sample = nullptr;
 
     // Defaults mirror the parameter-layout defaults ("showcase" tuning).
     float fbGain      = 0.75f;  // 0..1.1 — past 1.0 is "past the edge"
@@ -149,6 +156,7 @@ public:
         smoothedFreq.setTargetValue (target);
 
         osc.noteOn (rng);
+        samplePos = 0.0;
         env1.noteOn();
         env2.noteOn();
         env3.noteOn();
@@ -214,6 +222,15 @@ public:
             osc.setFrequency (freq);
             osc.updateDerived();
 
+            // Sample playback rate: repitched by the sounding frequency (so
+            // it glides/bends with the voice) relative to the root note, and
+            // corrected for the clip's own rate.
+            const bool sampleActive = params.sample != nullptr && params.srcSampleLevel > 0.0f;
+            double sampleRatio = 0.0;
+            if (sampleActive)
+                sampleRatio = (params.sample->sourceRate / sr)
+                              * (double) (freq / noteHz (params.srcSampleRoot));
+
             // Loop tuning tracks the sounding pitch (post-glide/octave/bend),
             // interpolated in the log domain toward the fixed anchor at 0%
             // keytrack, plus the tune offset.
@@ -268,6 +285,24 @@ public:
                     r += nz;
                 }
 
+                // Sample exciter: mono into both channels pre-loop, like noise.
+                if (sampleActive)
+                {
+                    const int total = params.sample->mono.getNumSamples();
+                    const bool ended = ! params.srcSampleLoop && samplePos >= (double) total;
+                    if (! ended)
+                    {
+                        const double pos = params.srcSampleLoop
+                                               ? std::fmod (samplePos, (double) total)
+                                               : samplePos;
+                        const float sv = params.sample->read (pos, params.srcSampleLoop)
+                                         * params.srcSampleLevel * 0.8f;
+                        l += sv;
+                        r += sv;
+                        samplePos += sampleRatio;
+                    }
+                }
+
                 // ENV2 adds on top of the knob (spec: base + amount * ADSR),
                 // clamped to the knob's own 110% ceiling.
                 const float fbBase = fbBaseSmoothed.getNextValue();
@@ -318,6 +353,7 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedFreq { 440.0f };
 
     VoiceParams params;
+    double samplePos = 0.0;
     int note = -1;
     bool heldDown = false;
     float level = 0.0f;

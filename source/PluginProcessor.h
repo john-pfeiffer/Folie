@@ -46,12 +46,26 @@ public:
     void setLoopOrder (const LoopOrder::Order& order);
     void moveLoopModule (LoopModuleID id, int delta);
 
+    // Sample exciter (message thread). The clip persists in the state tree as
+    // FLAC/Base64; the audio thread reads an atomic pointer snapshot per
+    // block, and replaced samples are retired for >= 2 blocks before freeing.
+    bool loadSampleFromFile (const juce::File& file);
+    juce::String getSampleName() const;
+
 private:
     EngineParams gatherParams() const;
+
+    void publishSample (std::unique_ptr<SampleData> newSample, bool updateStateProperties);
+    void purgeRetiredSamples();
 
     SynthEngine engine;
     juce::SmoothedValue<float> masterGain { 0.5f };
     std::atomic<juce::uint32> packedOrder { LoopOrder::pack (LoopOrder::canonical) };
+
+    std::unique_ptr<SampleData> currentSample;              // message-thread owner
+    std::atomic<const SampleData*> activeSample { nullptr }; // audio-thread snapshot source
+    std::vector<std::pair<std::unique_ptr<SampleData>, juce::uint64>> retiredSamples;
+    std::atomic<juce::uint64> blockCounter { 0 };
 
     struct RawParams
     {
@@ -63,6 +77,9 @@ private:
         std::atomic<float>* srcSawLevel = nullptr;
         std::atomic<float>* srcNoiseLevel = nullptr;
         std::atomic<float>* srcNoiseType = nullptr;
+        std::atomic<float>* srcSampleLevel = nullptr;
+        std::atomic<float>* srcSampleRoot = nullptr;
+        std::atomic<float>* srcSampleLoop = nullptr;
         std::atomic<float>* fbGain = nullptr;
         std::atomic<float>* fbKeytrack = nullptr;
         std::atomic<float>* fbTune = nullptr;
