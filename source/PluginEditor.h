@@ -18,11 +18,14 @@ private:
     SectionPanel oscSection { "OSCILLATOR" };
     Knob sawCount, detune, blend, width, octave;
 
+    SectionPanel loopSection { "FEEDBACK LOOP" };
+    Knob fbGain, fbKeytrack, fbTune, fbFilterMode, fbCutoff, fbReso, fbDrive;
+
     SectionPanel envSection { "AMP ENVELOPE" };
     Knob attack, decay, sustain, release;
 
     SectionPanel globalSection { "GLOBAL" };
-    Knob polyphony, glide, master;
+    Knob ceiling, polyphony, glide, master;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FolieAudioProcessorEditor)
 };

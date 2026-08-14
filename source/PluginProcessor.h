@@ -44,6 +44,7 @@ private:
 
     SynthEngine engine;
     juce::SmoothedValue<float> masterGain { 0.5f };
+    juce::dsp::Limiter<float> limiter; // always in-circuit — feedback safety net
 
     struct RawParams
     {
@@ -52,6 +53,14 @@ private:
         std::atomic<float>* blend = nullptr;
         std::atomic<float>* width = nullptr;
         std::atomic<float>* octave = nullptr;
+        std::atomic<float>* fbGain = nullptr;
+        std::atomic<float>* fbKeytrack = nullptr;
+        std::atomic<float>* fbTune = nullptr;
+        std::atomic<float>* fbFilterMode = nullptr;
+        std::atomic<float>* fbCutoff = nullptr;
+        std::atomic<float>* fbReso = nullptr;
+        std::atomic<float>* fbDrive = nullptr;
+        std::atomic<float>* limiterCeiling = nullptr;
         std::atomic<float>* env1A = nullptr;
         std::atomic<float>* env1D = nullptr;
         std::atomic<float>* env1S = nullptr;

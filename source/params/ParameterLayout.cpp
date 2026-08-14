@@ -42,6 +42,36 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                percentRange(), 80.0f, percentAttributes()),
         std::make_unique<API> (juce::ParameterID { ParamIDs::oscOctave, 1 }, "Octave", -2, 2, 0));
 
+    auto loop = std::make_unique<Group> ("loop", "Feedback Loop", "|");
+    {
+        // Log-ish cutoff knob: midpoint of knob travel lands at 640 Hz.
+        juce::NormalisableRange<float> cutoffRange { 20.0f, 20000.0f };
+        cutoffRange.setSkewForCentre (640.0f);
+
+        loop->addChild (
+            // The star knob. >100% is intentional: tanh in the loop self-limits.
+            std::make_unique<APF> (juce::ParameterID { ParamIDs::fbGain, 1 }, "Feedback",
+                                   juce::NormalisableRange<float> { 0.0f, 110.0f, 0.0f, 0.7f },
+                                   40.0f, percentAttributes()),
+            std::make_unique<APF> (juce::ParameterID { ParamIDs::fbKeytrack, 1 }, "Key Track",
+                                   percentRange(), 100.0f, percentAttributes()),
+            std::make_unique<APF> (juce::ParameterID { ParamIDs::fbTune, 1 }, "Loop Tune",
+                                   juce::NormalisableRange<float> { -24.0f, 24.0f, 0.1f }, 0.0f,
+                                   juce::AudioParameterFloatAttributes{}.withLabel ("st")),
+            std::make_unique<juce::AudioParameterChoice> (
+                juce::ParameterID { ParamIDs::fbFilterMode, 1 }, "Loop Filter",
+                juce::StringArray { "LP", "BP" }, 0),
+            std::make_unique<APF> (juce::ParameterID { ParamIDs::fbCutoff, 1 }, "Loop Cutoff",
+                                   cutoffRange, 4000.0f,
+                                   juce::AudioParameterFloatAttributes{}.withLabel ("Hz")),
+            std::make_unique<APF> (juce::ParameterID { ParamIDs::fbReso, 1 }, "Loop Reso",
+                                   juce::NormalisableRange<float> { 0.5f, 8.0f, 0.0f, 0.5f },
+                                   0.71f),
+            std::make_unique<APF> (juce::ParameterID { ParamIDs::fbDrive, 1 }, "Loop Drive",
+                                   juce::NormalisableRange<float> { 0.0f, 24.0f, 0.0f }, 0.0f,
+                                   juce::AudioParameterFloatAttributes{}.withLabel ("dB")));
+    }
+
     auto env1 = std::make_unique<Group> ("env1", "Amp Envelope", "|");
     env1->addChild (
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env1Attack, 1 }, "Amp Attack",
@@ -55,6 +85,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 
     auto global = std::make_unique<Group> ("global", "Global", "|");
     global->addChild (
+        // The limiter itself is always in-circuit (feedback synth safety net);
+        // only its ceiling is a parameter.
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::limiterCeiling, 1 }, "Ceiling",
+                               juce::NormalisableRange<float> { -12.0f, 0.0f, 0.0f }, -0.3f,
+                               juce::AudioParameterFloatAttributes{}.withLabel ("dB")),
         std::make_unique<API> (juce::ParameterID { ParamIDs::polyphony, 1 }, "Voices", 1, 16, 8),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::glideTime, 1 }, "Glide",
                                juce::NormalisableRange<float> { 0.0f, 2000.0f, 0.0f, 0.3f }, 0.0f,
@@ -69,5 +104,5 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                                           : juce::String (v, 1) + " dB";
                                    })));
 
-    return { std::move (osc), std::move (env1), std::move (global) };
+    return { std::move (osc), std::move (loop), std::move (env1), std::move (global) };
 }

@@ -12,6 +12,14 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.blend     = apvts.getRawParameterValue (ParamIDs::oscBlend);
     raw.width     = apvts.getRawParameterValue (ParamIDs::oscWidth);
     raw.octave    = apvts.getRawParameterValue (ParamIDs::oscOctave);
+    raw.fbGain       = apvts.getRawParameterValue (ParamIDs::fbGain);
+    raw.fbKeytrack   = apvts.getRawParameterValue (ParamIDs::fbKeytrack);
+    raw.fbTune       = apvts.getRawParameterValue (ParamIDs::fbTune);
+    raw.fbFilterMode = apvts.getRawParameterValue (ParamIDs::fbFilterMode);
+    raw.fbCutoff     = apvts.getRawParameterValue (ParamIDs::fbCutoff);
+    raw.fbReso       = apvts.getRawParameterValue (ParamIDs::fbReso);
+    raw.fbDrive      = apvts.getRawParameterValue (ParamIDs::fbDrive);
+    raw.limiterCeiling = apvts.getRawParameterValue (ParamIDs::limiterCeiling);
     raw.env1A     = apvts.getRawParameterValue (ParamIDs::env1Attack);
     raw.env1D     = apvts.getRawParameterValue (ParamIDs::env1Decay);
     raw.env1S     = apvts.getRawParameterValue (ParamIDs::env1Sustain);
@@ -29,6 +37,13 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.blend         = raw.blend->load() * 0.01f;
     p.voice.width         = raw.width->load() * 0.01f;
     p.voice.octave        = (int) raw.octave->load();
+    p.voice.fbGain        = raw.fbGain->load() * 0.01f;
+    p.voice.fbKeytrack    = raw.fbKeytrack->load() * 0.01f;
+    p.voice.fbTuneSemis   = raw.fbTune->load();
+    p.voice.fbBandpass    = raw.fbFilterMode->load() > 0.5f;
+    p.voice.fbCutoff      = raw.fbCutoff->load();
+    p.voice.fbReso        = raw.fbReso->load();
+    p.voice.fbDriveDb     = raw.fbDrive->load();
     p.voice.env1AttackMs  = raw.env1A->load();
     p.voice.env1DecayMs   = raw.env1D->load();
     p.voice.env1Sustain   = raw.env1S->load() * 0.01f;
@@ -38,11 +53,14 @@ EngineParams FolieAudioProcessor::gatherParams() const
     return p;
 }
 
-void FolieAudioProcessor::prepareToPlay (double sampleRate, int)
+void FolieAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate);
     engine.setParams (gatherParams());
     masterGain.reset (sampleRate, 0.02);
+
+    limiter.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 2 });
+    limiter.setRelease (100.0f);
 }
 
 bool FolieAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -63,6 +81,11 @@ void FolieAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     masterGain.setTargetValue (masterDb <= -59.9f ? 0.0f
                                                   : juce::Decibels::decibelsToGain (masterDb));
     masterGain.applyGain (buffer, buffer.getNumSamples());
+
+    limiter.setThreshold (raw.limiterCeiling->load());
+    juce::dsp::AudioBlock<float> block (buffer);
+    juce::dsp::ProcessContextReplacing<float> context (block);
+    limiter.process (context);
 }
 
 void FolieAudioProcessor::getStateInformation (juce::MemoryBlock& destData)

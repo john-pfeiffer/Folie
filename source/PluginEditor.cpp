@@ -9,10 +9,18 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
       blend (p.apvts, ParamIDs::oscBlend),
       width (p.apvts, ParamIDs::oscWidth),
       octave (p.apvts, ParamIDs::oscOctave),
+      fbGain (p.apvts, ParamIDs::fbGain),
+      fbKeytrack (p.apvts, ParamIDs::fbKeytrack),
+      fbTune (p.apvts, ParamIDs::fbTune),
+      fbFilterMode (p.apvts, ParamIDs::fbFilterMode),
+      fbCutoff (p.apvts, ParamIDs::fbCutoff),
+      fbReso (p.apvts, ParamIDs::fbReso),
+      fbDrive (p.apvts, ParamIDs::fbDrive),
       attack (p.apvts, ParamIDs::env1Attack),
       decay (p.apvts, ParamIDs::env1Decay),
       sustain (p.apvts, ParamIDs::env1Sustain),
       release (p.apvts, ParamIDs::env1Release),
+      ceiling (p.apvts, ParamIDs::limiterCeiling),
       polyphony (p.apvts, ParamIDs::polyphony),
       glide (p.apvts, ParamIDs::glideTime),
       master (p.apvts, ParamIDs::masterVolume)
@@ -24,12 +32,22 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     oscSection.addItem (octave);
     addAndMakeVisible (oscSection);
 
+    loopSection.addItem (fbGain);
+    loopSection.addItem (fbKeytrack);
+    loopSection.addItem (fbTune);
+    loopSection.addItem (fbFilterMode);
+    loopSection.addItem (fbCutoff);
+    loopSection.addItem (fbReso);
+    loopSection.addItem (fbDrive);
+    addAndMakeVisible (loopSection);
+
     envSection.addItem (attack);
     envSection.addItem (decay);
     envSection.addItem (sustain);
     envSection.addItem (release);
     addAndMakeVisible (envSection);
 
+    globalSection.addItem (ceiling);
     globalSection.addItem (polyphony);
     globalSection.addItem (glide);
     globalSection.addItem (master);
@@ -58,8 +76,9 @@ void FolieAudioProcessorEditor::resized()
     auto area = getLocalBounds().reduced (8);
     area.removeFromTop (32);
 
-    const int rowHeight = area.getHeight() / 3;
+    const int rowHeight = area.getHeight() / 4;
     oscSection.setBounds (area.removeFromTop (rowHeight));
+    loopSection.setBounds (area.removeFromTop (rowHeight));
     envSection.setBounds (area.removeFromTop (rowHeight));
     globalSection.setBounds (area);
 }

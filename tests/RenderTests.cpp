@@ -5,6 +5,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "dsp/SynthEngine.h"
+#include "dsp/TunedFeedbackLoop.h"
 
 #include <cstdio>
 
@@ -188,6 +189,95 @@ void testOscillatorPitch()
     std::printf ("      osc pitch: dominant %.2f Hz (%.1f cents from A2)\n", peak, cents);
     check (std::abs (cents) < 20.0f, "osc pitch: single saw fundamental within 20 cents of A2");
 }
+// The core promise of the instrument: excite the loop with a burst, let it
+// ring at high feedback, and the ringing pitch must be the note you asked for
+// (Karplus-Strong behavior). Tests the tuning math + fractional delay directly.
+void testLoopPitch()
+{
+    for (const float target : { 110.0f, 880.0f }) // A2 and A5 (A5 nears min-delay clamp territory at high keytrack offsets)
+    {
+        TunedFeedbackLoop feedbackLoop;
+        feedbackLoop.prepare (kSampleRate);
+        feedbackLoop.setFilter (false, 8000.0f, 0.71f);
+        feedbackLoop.setDrive (0.0f);
+        feedbackLoop.setFeedbackGain (0.98f);
+        feedbackLoop.setLoopFrequency (target);
+
+        const int totalSamples = (int) kSampleRate * 2;
+        juce::AudioBuffer<float> out (1, totalSamples);
+
+        // 50 ms sine burst at the target pitch (like the saw fundamental
+        // feeding the loop in real use), then free ringing. A noise burst
+        // would excite every comb mode equally and the FFT could legitimately
+        // pick a high harmonic as "dominant".
+        const int burst = (int) (0.05 * kSampleRate);
+        for (int i = 0; i < totalSamples; ++i)
+        {
+            const float dry = i < burst
+                                  ? 0.5f * std::sin (juce::MathConstants<float>::twoPi
+                                                     * target * (float) i / (float) kSampleRate)
+                                  : 0.0f;
+            out.setSample (0, i, feedbackLoop.processSample (dry));
+        }
+
+        const float peak = dominantFrequency (out, 1.0);
+        const float cents = centsBetween (peak, target);
+        std::printf ("      loop pitch: target %.0f Hz -> rings at %.2f Hz (%.1f cents)\n",
+                     target, peak, cents);
+        check (std::abs (cents) < 50.0f, "loop pitch: rings within 50 cents of target");
+    }
+}
+
+// Worst case everything: 110% feedback, +24 dB drive, wide-open filter, high
+// resonance, 16 voices. Must stay finite and bounded (tanh + DC blocker are
+// the guarantees under test).
+void testLoopStabilityAtExtremes()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.fbGain = 1.1f;
+    p.voice.fbDriveDb = 24.0f;
+    p.voice.fbCutoff = 20000.0f;
+    p.voice.fbReso = 8.0f;
+    p.voice.fbTuneSemis = 12.0f;
+    p.voice.sawCount = 16;
+    p.voice.env1Sustain = 1.0f;
+    p.polyphony = 16;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events;
+    for (int i = 0; i < 16; ++i)
+        events.emplace_back (i * 400, juce::MidiMessage::noteOn (1, 36 + i * 3, 1.0f));
+
+    auto out = render (engine, events, 10.0);
+    check (allFinite (out, 20.0f), "loop stability: 16 voices at 110% fb / +24 dB drive stay finite & bounded");
+    check (out.getMagnitude (0, out.getNumSamples()) > 0.01f, "loop stability: still producing signal");
+}
+
+// After note-off + release the voice must go silent even with the loop pushed
+// past unity — ENV1 gates the loop, and the voice must actually free itself.
+void testFeedbackTailGated()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.fbGain = 1.1f;
+    p.voice.fbDriveDb = 12.0f;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 48, 0.9f) },
+        { (int) kSampleRate, juce::MidiMessage::noteOff (1, 48) },
+    };
+
+    auto out = render (engine, events, 7.0);
+    check (rmsOfTail (out, 1.0) < juce::Decibels::decibelsToGain (-60.0f),
+           "feedback tail: gated silent by amp env after release");
+    check (engine.countActiveVoices() == 0, "feedback tail: voice freed");
+}
 } // namespace
 
 int main()
@@ -195,6 +285,9 @@ int main()
     testPolyphonicSanity();
     testTailDecay();
     testOscillatorPitch();
+    testLoopPitch();
+    testLoopStabilityAtExtremes();
+    testFeedbackTailGated();
 
     std::printf (failures == 0 ? "All tests passed.\n" : "%d test(s) FAILED.\n", failures);
     return failures == 0 ? 0 : 1;

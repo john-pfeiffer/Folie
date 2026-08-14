@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SupersawOscillator.h"
+#include "TunedFeedbackLoop.h"
 
 // Parameters fanned out from the APVTS once per block (plain values — the
 // audio thread never touches parameter objects directly).
@@ -11,10 +12,21 @@ struct VoiceParams
     float blend      = 0.6f;    // 0..1
     float width      = 0.8f;    // 0..1
     int   octave     = 0;       // -2..+2
+
+    float fbGain      = 0.4f;   // 0..1.1 — past 1.0 is "past the edge"
+    float fbKeytrack  = 1.0f;   // 0..1; 0 = loop pinned to fbBaseHz
+    float fbTuneSemis = 0.0f;   // -24..+24
+    bool  fbBandpass  = false;
+    float fbCutoff    = 4000.0f;
+    float fbReso      = 0.71f;
+    float fbDriveDb   = 0.0f;
+
     float env1AttackMs  = 5.0f;
     float env1DecayMs   = 200.0f;
     float env1Sustain   = 0.8f; // 0..1
     float env1ReleaseMs = 300.0f;
+
+    static constexpr float fbBaseHz = 261.63f; // loop anchor at 0% keytrack
 };
 
 // One synth voice: supersaw stack + amp ADSR + glide. The tuned feedback loop
@@ -30,6 +42,7 @@ public:
         sr = sampleRate;
         rng.setSeed ((juce::int64) 0x466f6c69 + voiceIndex);
         osc.prepare (sampleRate);
+        loop.prepare (sampleRate);
         env1.setSampleRate (sampleRate);
         smoothedFreq.reset (sampleRate, 0.0);
         reset();
@@ -38,6 +51,7 @@ public:
     void reset()
     {
         env1.reset();
+        loop.reset();
         note = -1;
         lastEnvLevel = 0.0f;
     }
@@ -46,6 +60,9 @@ public:
     {
         params = p;
         osc.setParams (p.sawCount, p.detune, p.blend, p.width);
+        loop.setFilter (p.fbBandpass, p.fbCutoff, p.fbReso);
+        loop.setDrive (p.fbDriveDb);
+        loop.setFeedbackGain (p.fbGain);
         env1.setParameters ({ p.env1AttackMs * 0.001f,
                               p.env1DecayMs * 0.001f,
                               p.env1Sustain,
@@ -110,16 +127,31 @@ public:
             osc.setFrequency (freq);
             osc.updateDerived();
 
+            // Loop tuning tracks the sounding pitch (post-glide/octave/bend),
+            // interpolated in the log domain toward the fixed anchor at 0%
+            // keytrack, plus the tune offset.
+            const float loopHz = std::exp2 (params.fbKeytrack * std::log2 (freq)
+                                            + (1.0f - params.fbKeytrack)
+                                                  * std::log2 (VoiceParams::fbBaseHz)
+                                            + params.fbTuneSemis / 12.0f);
+            loop.setLoopFrequency (loopHz);
+
             for (int i = 0; i < n; ++i)
             {
                 float l, r;
                 osc.processSample (l, r);
 
+                // The loop runs on the mono sum; its return is added equally
+                // L/R (mono loop per voice — dual stereo loops is a tracked
+                // v2 idea).
+                const float mono = 0.5f * (l + r);
+                const float fbComponent = loop.processSample (mono) - mono;
+
                 const float amp = level * env1.getNextSample();
                 lastEnvLevel = amp;
 
-                left[pos + i] += l * amp;
-                right[pos + i] += r * amp;
+                left[pos + i] += (l + fbComponent) * amp;
+                right[pos + i] += (r + fbComponent) * amp;
             }
 
             if (! env1.isActive())
@@ -143,6 +175,7 @@ private:
     juce::Random rng;
 
     SupersawOscillator osc;
+    TunedFeedbackLoop loop;
     juce::ADSR env1;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedFreq { 440.0f };
 
