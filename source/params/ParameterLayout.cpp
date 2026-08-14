@@ -18,14 +18,48 @@ juce::NormalisableRange<float> envTimeRange()
     return { 1.0f, 10000.0f, 0.0f, 0.3f };
 }
 
+// The slider text boxes display exactly the string function output, so units
+// live in the strings (labels are still set for hosts' generic views).
 auto msAttributes()
 {
-    return juce::AudioParameterFloatAttributes{}.withLabel ("ms");
+    return juce::AudioParameterFloatAttributes{}
+        .withLabel ("ms")
+        .withStringFromValueFunction ([] (float v, int)
+        {
+            return v >= 1000.0f ? juce::String (v * 0.001f, 2) + " s"
+                                : juce::String (juce::roundToInt (v)) + " ms";
+        });
 }
 
 auto percentAttributes()
 {
-    return juce::AudioParameterFloatAttributes{}.withLabel ("%");
+    return juce::AudioParameterFloatAttributes{}
+        .withLabel ("%")
+        .withStringFromValueFunction ([] (float v, int)
+        {
+            return juce::String (v, 1) + " %";
+        });
+}
+
+auto hzAttributes()
+{
+    return juce::AudioParameterFloatAttributes{}
+        .withLabel ("Hz")
+        .withStringFromValueFunction ([] (float v, int)
+        {
+            return v >= 1000.0f ? juce::String (v * 0.001f, 1) + " kHz"
+                                : juce::String (juce::roundToInt (v)) + " Hz";
+        });
+}
+
+auto dbAttributes()
+{
+    return juce::AudioParameterFloatAttributes{}
+        .withLabel ("dB")
+        .withStringFromValueFunction ([] (float v, int)
+        {
+            return juce::String (v, 1) + " dB";
+        });
 }
 } // namespace
 
@@ -52,24 +86,29 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
             // The star knob. >100% is intentional: tanh in the loop self-limits.
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbGain, 1 }, "Feedback",
                                    juce::NormalisableRange<float> { 0.0f, 110.0f, 0.0f, 0.7f },
-                                   40.0f, percentAttributes()),
+                                   75.0f, percentAttributes()),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbKeytrack, 1 }, "Key Track",
                                    percentRange(), 100.0f, percentAttributes()),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbTune, 1 }, "Loop Tune",
                                    juce::NormalisableRange<float> { -24.0f, 24.0f, 0.1f }, 0.0f,
-                                   juce::AudioParameterFloatAttributes{}.withLabel ("st")),
+                                   juce::AudioParameterFloatAttributes{}
+                                       .withLabel ("st")
+                                       .withStringFromValueFunction ([] (float v, int)
+                                       { return juce::String (v, 1) + " st"; })),
             std::make_unique<juce::AudioParameterChoice> (
                 juce::ParameterID { ParamIDs::fbFilterMode, 1 }, "Loop Filter",
                 juce::StringArray { "LP", "BP" }, 0),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbCutoff, 1 }, "Loop Cutoff",
-                                   cutoffRange, 4000.0f,
-                                   juce::AudioParameterFloatAttributes{}.withLabel ("Hz")),
+                                   cutoffRange, 4000.0f, hzAttributes()),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbReso, 1 }, "Loop Reso",
                                    juce::NormalisableRange<float> { 0.5f, 8.0f, 0.0f, 0.5f },
-                                   0.71f),
+                                   1.5f,
+                                   juce::AudioParameterFloatAttributes{}
+                                       .withStringFromValueFunction ([] (float v, int)
+                                       { return juce::String (v, 2); })),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbDrive, 1 }, "Loop Drive",
-                                   juce::NormalisableRange<float> { 0.0f, 24.0f, 0.0f }, 0.0f,
-                                   juce::AudioParameterFloatAttributes{}.withLabel ("dB")));
+                                   juce::NormalisableRange<float> { 0.0f, 24.0f, 0.0f }, 6.0f,
+                                   dbAttributes()));
     }
 
     auto env1 = std::make_unique<Group> ("env1", "Amp Envelope", "|");
@@ -114,11 +153,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 
     auto fx = std::make_unique<Group> ("fx", "FX", "|");
     fx->addChild (
+        // Chorus defaults ON — the supersaw's finishing layer is the first
+        // impression; one click to disable.
         std::make_unique<juce::AudioParameterBool> (
-            juce::ParameterID { ParamIDs::chorusOn, 1 }, "Chorus", false),
+            juce::ParameterID { ParamIDs::chorusOn, 1 }, "Chorus", true),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::chorusRate, 1 }, "Rate",
                                juce::NormalisableRange<float> { 0.05f, 8.0f, 0.0f, 0.5f }, 0.8f,
-                               juce::AudioParameterFloatAttributes{}.withLabel ("Hz")),
+                               juce::AudioParameterFloatAttributes{}
+                                   .withLabel ("Hz")
+                                   .withStringFromValueFunction ([] (float v, int)
+                                   { return juce::String (v, 2) + " Hz"; })),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::chorusDepth, 1 }, "Depth",
                                percentRange(), 30.0f, percentAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::chorusMix, 1 }, "Ch Mix",
@@ -148,7 +192,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         // only its ceiling is a parameter.
         std::make_unique<APF> (juce::ParameterID { ParamIDs::limiterCeiling, 1 }, "Ceiling",
                                juce::NormalisableRange<float> { -12.0f, 0.0f, 0.0f }, -0.3f,
-                               juce::AudioParameterFloatAttributes{}.withLabel ("dB")),
+                               dbAttributes()),
         std::make_unique<API> (juce::ParameterID { ParamIDs::polyphony, 1 }, "Voices", 1, 16, 8),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::glideTime, 1 }, "Glide",
                                juce::NormalisableRange<float> { 0.0f, 2000.0f, 0.0f, 0.3f }, 0.0f,

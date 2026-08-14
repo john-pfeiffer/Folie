@@ -13,13 +13,14 @@ struct VoiceParams
     float width      = 0.8f;    // 0..1
     int   octave     = 0;       // -2..+2
 
-    float fbGain      = 0.4f;   // 0..1.1 — past 1.0 is "past the edge"
+    // Defaults mirror the parameter-layout defaults ("showcase" tuning).
+    float fbGain      = 0.75f;  // 0..1.1 — past 1.0 is "past the edge"
     float fbKeytrack  = 1.0f;   // 0..1; 0 = loop pinned to fbBaseHz
     float fbTuneSemis = 0.0f;   // -24..+24
     bool  fbBandpass  = false;
     float fbCutoff    = 4000.0f;
-    float fbReso      = 0.71f;
-    float fbDriveDb   = 0.0f;
+    float fbReso      = 1.5f;
+    float fbDriveDb   = 6.0f;
 
     float env1AttackMs  = 5.0f;
     float env1DecayMs   = 200.0f;

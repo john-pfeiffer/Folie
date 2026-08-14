@@ -165,8 +165,8 @@ void FolieAudioProcessor::setSavedEditorSize (int w, int h)
 
 juce::Point<int> FolieAudioProcessor::getSavedEditorSize() const
 {
-    return { (int) apvts.state.getProperty ("uiWidth", 780),
-             (int) apvts.state.getProperty ("uiHeight", 540) };
+    return { (int) apvts.state.getProperty ("uiWidth", 1100),
+             (int) apvts.state.getProperty ("uiHeight", 740) };
 }
 
 juce::AudioProcessorEditor* FolieAudioProcessor::createEditor()

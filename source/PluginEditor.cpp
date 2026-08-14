@@ -108,10 +108,10 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     addAndMakeVisible (globalSection);
 
     setResizable (true, true);
-    setResizeLimits (520, 360, 1560, 1080);
+    setResizeLimits (900, 620, 1800, 1240);
 
     const auto saved = processor.getSavedEditorSize();
-    setSize (saved.x, saved.y);
+    setSize (juce::jmax (900, saved.x), juce::jmax (620, saved.y));
 }
 
 void FolieAudioProcessorEditor::paint (juce::Graphics& g)

@@ -411,6 +411,39 @@ void testFxExtremes()
     check (allFinite (buffer, 20.0f), "fx extremes: all-on maxed chain stays finite & bounded");
 }
 
+// Regression guard for the field report "no feedback loop at all": the same
+// held-note phrase with hot feedback must carry substantially more energy than
+// with the loop off. (An earlier tanh normalization capped the loop at
+// 1/drive and made it inaudible.)
+void testFeedbackIsAudible()
+{
+    auto renderWithFeedback = [] (float fbGain, float driveDb)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+
+        auto p = defaultParams();
+        p.voice.fbGain = fbGain;
+        p.voice.fbDriveDb = driveDb;
+        p.voice.env1Sustain = 1.0f;
+        engine.setParams (p);
+
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },
+        };
+        return render (engine, events, 3.0);
+    };
+
+    const auto dry = renderWithFeedback (0.0f, 0.0f);
+    const auto hot = renderWithFeedback (0.9f, 6.0f);
+
+    const float dryRms = dry.getRMSLevel (0, (int) kSampleRate, (int) kSampleRate);
+    const float hotRms = hot.getRMSLevel (0, (int) kSampleRate, (int) kSampleRate);
+    std::printf ("      fb audibility: RMS fb-off %.4f vs fb-hot %.4f (%.2fx)\n",
+                 dryRms, hotRms, hotRms / juce::jmax (1.0e-9f, dryRms));
+    check (hotRms > dryRms * 1.25f, "fb audibility: hot loop adds >1.25x RMS over dry saws");
+}
+
 // The delay must actually delay: with a 500 ms delay and the dry phrase ending
 // before the render does, the late window must carry echo energy that the dry
 // render doesn't have.
@@ -446,6 +479,7 @@ int main()
     testFxBypassPassthrough();
     testFxExtremes();
     testDelayProducesTail();
+    testFeedbackIsAudible();
 
     std::printf (failures == 0 ? "All tests passed.\n" : "%d test(s) FAILED.\n", failures);
     return failures == 0 ? 0 : 1;

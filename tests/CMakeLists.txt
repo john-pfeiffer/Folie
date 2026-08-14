@@ -17,3 +17,22 @@ target_link_libraries(FolieTests PRIVATE
     juce::juce_recommended_warning_flags)
 
 add_test(NAME FolieRenderTests COMMAND FolieTests)
+
+# Dev tool (not a test, not in CI): renders the editor to PNGs headlessly.
+# Run under xvfb-run on Linux. Compiles the plugin sources directly (the
+# plugin target's JUCE modules are linked PRIVATE and don't propagate).
+juce_add_console_app(FolieSnapshot PRODUCT_NAME "FolieSnapshot")
+target_sources(FolieSnapshot PRIVATE
+    SnapshotTool.cpp
+    ${CMAKE_SOURCE_DIR}/source/PluginProcessor.cpp
+    ${CMAKE_SOURCE_DIR}/source/PluginEditor.cpp
+    ${CMAKE_SOURCE_DIR}/source/params/ParameterLayout.cpp)
+target_include_directories(FolieSnapshot PRIVATE ${CMAKE_SOURCE_DIR}/source)
+target_compile_definitions(FolieSnapshot PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JucePlugin_Name="Folie")
+target_link_libraries(FolieSnapshot PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    juce::juce_recommended_config_flags)

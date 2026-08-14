@@ -78,10 +78,12 @@ public:
         const float delayed = delay.popSample (0, delaySamples);
         const float filtered = svf.processSample (0, delayed);
 
-        // Normalized tanh: small-signal loop gain stays unity as drive rises,
-        // so Drive adds color/compression without re-calibrating the Feedback
-        // knob's danger zone.
-        const float shaped = std::tanh (driveLin * filtered) / driveLin;
+        // Plain tanh: the output ceiling stays +/-1 regardless of drive, so the
+        // loop is always audible next to the saws, and small-signal loop gain is
+        // fb * drive — Drive pushes the loop INTO self-oscillation. (An earlier
+        // /drive normalization capped the loop at 1/drive and made cranking
+        // Drive turn the feedback DOWN.)
+        const float shaped = std::tanh (driveLin * filtered);
 
         // In-loop DC blocker (~20 Hz one-pole HP). Mandatory: recirculated DC
         // from asymmetric saturation would walk the loop into tanh's rails.
