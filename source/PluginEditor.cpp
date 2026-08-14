@@ -20,6 +20,16 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
       decay (p.apvts, ParamIDs::env1Decay),
       sustain (p.apvts, ParamIDs::env1Sustain),
       release (p.apvts, ParamIDs::env1Release),
+      fbAttack (p.apvts, ParamIDs::env2Attack),
+      fbDecay (p.apvts, ParamIDs::env2Decay),
+      fbSustain (p.apvts, ParamIDs::env2Sustain),
+      fbRelease (p.apvts, ParamIDs::env2Release),
+      fbAmount (p.apvts, ParamIDs::env2Amount),
+      cutAttack (p.apvts, ParamIDs::env3Attack),
+      cutDecay (p.apvts, ParamIDs::env3Decay),
+      cutSustain (p.apvts, ParamIDs::env3Sustain),
+      cutRelease (p.apvts, ParamIDs::env3Release),
+      cutAmount (p.apvts, ParamIDs::env3Amount),
       ceiling (p.apvts, ParamIDs::limiterCeiling),
       polyphony (p.apvts, ParamIDs::polyphony),
       glide (p.apvts, ParamIDs::glideTime),
@@ -46,6 +56,20 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     envSection.addItem (sustain);
     envSection.addItem (release);
     addAndMakeVisible (envSection);
+
+    env2Section.addItem (fbAttack);
+    env2Section.addItem (fbDecay);
+    env2Section.addItem (fbSustain);
+    env2Section.addItem (fbRelease);
+    env2Section.addItem (fbAmount);
+    addAndMakeVisible (env2Section);
+
+    env3Section.addItem (cutAttack);
+    env3Section.addItem (cutDecay);
+    env3Section.addItem (cutSustain);
+    env3Section.addItem (cutRelease);
+    env3Section.addItem (cutAmount);
+    addAndMakeVisible (env3Section);
 
     globalSection.addItem (ceiling);
     globalSection.addItem (polyphony);
@@ -79,6 +103,12 @@ void FolieAudioProcessorEditor::resized()
     const int rowHeight = area.getHeight() / 4;
     oscSection.setBounds (area.removeFromTop (rowHeight));
     loopSection.setBounds (area.removeFromTop (rowHeight));
-    envSection.setBounds (area.removeFromTop (rowHeight));
+
+    // Three envelopes share one row: AMP (4 knobs) | FEEDBACK (5) | CUTOFF (5).
+    auto envRow = area.removeFromTop (rowHeight);
+    envSection.setBounds (envRow.removeFromLeft (envRow.getWidth() * 4 / 14));
+    env2Section.setBounds (envRow.removeFromLeft (envRow.getWidth() / 2));
+    env3Section.setBounds (envRow);
+
     globalSection.setBounds (area);
 }

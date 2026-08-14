@@ -30,7 +30,6 @@ public:
         delay.setMaximumDelayInSamples ((int) std::ceil (sampleRate / (double) minLoopHz) + 8);
         svf.prepare (spec);
 
-        fbSmoothed.reset (sampleRate, 0.01);
         dcCoeff = 1.0f - juce::MathConstants<float>::twoPi * 20.0f / (float) sampleRate;
         reset();
     }
@@ -40,7 +39,6 @@ public:
         delay.reset();
         svf.reset();
         dcX1 = dcY1 = 0.0f;
-        fbSmoothed.setCurrentAndTargetValue (fbSmoothed.getTargetValue());
     }
 
     // hz is the desired loop resonance; clamped so the delay stays within the
@@ -58,8 +56,14 @@ public:
     {
         svf.setType (bandpass ? juce::dsp::StateVariableTPTFilterType::bandpass
                               : juce::dsp::StateVariableTPTFilterType::lowpass);
-        svf.setCutoffFrequency (juce::jlimit (20.0f, (float) sr * 0.45f, cutoffHz));
+        setCutoff (cutoffHz);
         svf.setResonance (juce::jmax (0.1f, q));
+    }
+
+    // Cheap enough to call at chunk rate while ENV3 sweeps it.
+    void setCutoff (float cutoffHz)
+    {
+        svf.setCutoffFrequency (juce::jlimit (20.0f, (float) sr * 0.45f, cutoffHz));
     }
 
     void setDrive (float driveDb)
@@ -67,10 +71,9 @@ public:
         driveLin = juce::Decibels::decibelsToGain (driveDb);
     }
 
-    void setFeedbackGain (float gain) { fbSmoothed.setTargetValue (gain); }
-
-    // Returns y = dry + fb * loopOut; y is also what recirculates.
-    forcedinline float processSample (float dry) noexcept
+    // Returns y = dry + fbGain * loopOut; y is also what recirculates.
+    // fbGain is per-sample: the caller owns smoothing/enveloping (ENV2).
+    forcedinline float processSample (float dry, float fbGain) noexcept
     {
         const float delayed = delay.popSample (0, delaySamples);
         const float filtered = svf.processSample (0, delayed);
@@ -86,7 +89,7 @@ public:
         dcX1 = shaped;
         dcY1 = dcOut;
 
-        const float y = dry + fbSmoothed.getNextValue() * dcOut;
+        const float y = dry + fbGain * dcOut;
         delay.pushSample (0, y);
         return y;
     }
@@ -95,7 +98,6 @@ private:
     double sr = 44100.0;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delay { 4800 };
     juce::dsp::StateVariableTPTFilter<float> svf;
-    juce::SmoothedValue<float> fbSmoothed { 0.0f };
 
     float delaySamples = 100.0f;
     float driveLin = 1.0f;

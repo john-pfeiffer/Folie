@@ -200,7 +200,6 @@ void testLoopPitch()
         feedbackLoop.prepare (kSampleRate);
         feedbackLoop.setFilter (false, 8000.0f, 0.71f);
         feedbackLoop.setDrive (0.0f);
-        feedbackLoop.setFeedbackGain (0.98f);
         feedbackLoop.setLoopFrequency (target);
 
         const int totalSamples = (int) kSampleRate * 2;
@@ -217,7 +216,7 @@ void testLoopPitch()
                                   ? 0.5f * std::sin (juce::MathConstants<float>::twoPi
                                                      * target * (float) i / (float) kSampleRate)
                                   : 0.0f;
-            out.setSample (0, i, feedbackLoop.processSample (dry));
+            out.setSample (0, i, feedbackLoop.processSample (dry, 0.98f));
         }
 
         const float peak = dominantFrequency (out, 1.0);
@@ -278,6 +277,71 @@ void testFeedbackTailGated()
            "feedback tail: gated silent by amp env after release");
     check (engine.countActiveVoices() == 0, "feedback tail: voice freed");
 }
+// ENV2 must actually shape the feedback: with amount=100% and sustain=0, the
+// loop's contribution dies after the decay even though the note is held —
+// versus amount=0 where fb>1 keeps the loop screaming. Compare late-window
+// energy of the two renders.
+void testFeedbackEnvelopeModulates()
+{
+    auto renderWithAmount = [] (float amount)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+
+        auto p = defaultParams();
+        p.voice.sawCount = 1;
+        p.voice.fbGain = 1.05f;
+        p.voice.env1Sustain = 1.0f;
+        p.voice.env2Amount = amount;
+        p.voice.env2DecayMs = 200.0f;
+        p.voice.env2Sustain = 0.0f;
+        engine.setParams (p);
+
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 48, 0.9f) },
+        };
+        return render (engine, events, 4.0);
+    };
+
+    const auto held = renderWithAmount (0.0f);
+    const auto enveloped = renderWithAmount (1.0f);
+
+    const float heldLate = rmsOfTail (held, 1.0);
+    const float envelopedLate = rmsOfTail (enveloped, 1.0);
+    std::printf ("      env2: late RMS static fb %.4f vs enveloped fb %.4f\n",
+                 heldLate, envelopedLate);
+    check (envelopedLate < heldLate * 0.7f,
+           "env2: enveloped feedback is quieter late in the note than static feedback");
+
+    // And the enveloped render must stay finite while modulating per-sample.
+    check (allFinite (enveloped, 20.0f), "env2: enveloped render finite");
+}
+
+// ENV3 sweep at extreme settings must stay stable (per-sample env, chunk-rate
+// cutoff updates into the TPT filter).
+void testCutoffEnvelopeStability()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.fbGain = 1.1f;
+    p.voice.fbDriveDb = 24.0f;
+    p.voice.fbReso = 8.0f;
+    p.voice.env3Amount = 1.0f;   // +5 octaves from 4 kHz, clamped internally
+    p.voice.env3DecayMs = 100.0f;
+    p.voice.env3Sustain = 0.0f;  // full sweep down every note
+    p.voice.env2Amount = 1.0f;
+    p.polyphony = 8;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events;
+    for (int i = 0; i < 8; ++i)
+        events.emplace_back (i * 6000, juce::MidiMessage::noteOn (1, 40 + i * 4, 1.0f));
+
+    auto out = render (engine, events, 6.0);
+    check (allFinite (out, 20.0f), "env3: extreme swept-cutoff render stays finite");
+}
 } // namespace
 
 int main()
@@ -288,6 +352,8 @@ int main()
     testLoopPitch();
     testLoopStabilityAtExtremes();
     testFeedbackTailGated();
+    testFeedbackEnvelopeModulates();
+    testCutoffEnvelopeStability();
 
     std::printf (failures == 0 ? "All tests passed.\n" : "%d test(s) FAILED.\n", failures);
     return failures == 0 ? 0 : 1;

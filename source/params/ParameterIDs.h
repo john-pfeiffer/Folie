@@ -26,6 +26,20 @@ inline constexpr auto env1Decay   = "env1Decay";
 inline constexpr auto env1Sustain = "env1Sustain";
 inline constexpr auto env1Release = "env1Release";
 
+// ENV2 — feedback gain
+inline constexpr auto env2Attack  = "env2Attack";
+inline constexpr auto env2Decay   = "env2Decay";
+inline constexpr auto env2Sustain = "env2Sustain";
+inline constexpr auto env2Release = "env2Release";
+inline constexpr auto env2Amount  = "env2Amount";
+
+// ENV3 — loop filter cutoff
+inline constexpr auto env3Attack  = "env3Attack";
+inline constexpr auto env3Decay   = "env3Decay";
+inline constexpr auto env3Sustain = "env3Sustain";
+inline constexpr auto env3Release = "env3Release";
+inline constexpr auto env3Amount  = "env3Amount";
+
 // Global
 inline constexpr auto limiterCeiling = "limiterCeiling";
 inline constexpr auto polyphony    = "polyphony";

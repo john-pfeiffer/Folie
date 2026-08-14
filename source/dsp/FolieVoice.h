@@ -26,6 +26,20 @@ struct VoiceParams
     float env1Sustain   = 0.8f; // 0..1
     float env1ReleaseMs = 300.0f;
 
+    // ENV2 -> feedback gain: fbEff = fbGain * ((1 - amt) + amt * env2)
+    float env2AttackMs  = 5.0f;
+    float env2DecayMs   = 400.0f;
+    float env2Sustain   = 1.0f;
+    float env2ReleaseMs = 300.0f;
+    float env2Amount    = 0.0f; // 0..1
+
+    // ENV3 -> loop cutoff: cutEff = fbCutoff * 2^(5 * amt * env3), amt bipolar
+    float env3AttackMs  = 5.0f;
+    float env3DecayMs   = 600.0f;
+    float env3Sustain   = 1.0f;
+    float env3ReleaseMs = 300.0f;
+    float env3Amount    = 0.0f; // -1..+1
+
     static constexpr float fbBaseHz = 261.63f; // loop anchor at 0% keytrack
 };
 
@@ -44,6 +58,9 @@ public:
         osc.prepare (sampleRate);
         loop.prepare (sampleRate);
         env1.setSampleRate (sampleRate);
+        env2.setSampleRate (sampleRate);
+        env3.setSampleRate (sampleRate);
+        fbBaseSmoothed.reset (sampleRate, 0.01);
         smoothedFreq.reset (sampleRate, 0.0);
         reset();
     }
@@ -51,9 +68,12 @@ public:
     void reset()
     {
         env1.reset();
+        env2.reset();
+        env3.reset();
         loop.reset();
         note = -1;
         lastEnvLevel = 0.0f;
+        fbBaseSmoothed.setCurrentAndTargetValue (fbBaseSmoothed.getTargetValue());
     }
 
     void setParams (const VoiceParams& p)
@@ -62,11 +82,19 @@ public:
         osc.setParams (p.sawCount, p.detune, p.blend, p.width);
         loop.setFilter (p.fbBandpass, p.fbCutoff, p.fbReso);
         loop.setDrive (p.fbDriveDb);
-        loop.setFeedbackGain (p.fbGain);
+        fbBaseSmoothed.setTargetValue (p.fbGain);
         env1.setParameters ({ p.env1AttackMs * 0.001f,
                               p.env1DecayMs * 0.001f,
                               p.env1Sustain,
                               p.env1ReleaseMs * 0.001f });
+        env2.setParameters ({ p.env2AttackMs * 0.001f,
+                              p.env2DecayMs * 0.001f,
+                              p.env2Sustain,
+                              p.env2ReleaseMs * 0.001f });
+        env3.setParameters ({ p.env3AttackMs * 0.001f,
+                              p.env3DecayMs * 0.001f,
+                              p.env3Sustain,
+                              p.env3ReleaseMs * 0.001f });
     }
 
     void startNote (int midiNote, float velocity, float glideFromHz, float glideSeconds)
@@ -81,12 +109,18 @@ public:
 
         osc.noteOn (rng);
         env1.noteOn();
+        env2.noteOn();
+        env3.noteOn();
     }
 
     void stopNote (bool allowTailOff)
     {
         if (allowTailOff)
+        {
             env1.noteOff();
+            env2.noteOff();
+            env3.noteOff();
+        }
         else
         {
             reset();
@@ -136,16 +170,32 @@ public:
                                             + params.fbTuneSemis / 12.0f);
             loop.setLoopFrequency (loopHz);
 
+            // ENV3 sweeps the damping cutoff. The envelope advances per
+            // sample (below); the filter coefficient updates at chunk rate,
+            // which the TPT structure tolerates and keeps tan() off the
+            // per-sample path.
+            if (std::abs (params.env3Amount) > 1.0e-4f)
+                loop.setCutoff (params.fbCutoff
+                                * std::exp2 (5.0f * params.env3Amount * env3Level));
+
             for (int i = 0; i < n; ++i)
             {
                 float l, r;
                 osc.processSample (l, r);
 
+                // ENV2 blends the feedback gain between its static knob value
+                // and the fully-enveloped value.
+                const float fbBase = fbBaseSmoothed.getNextValue();
+                const float env2Sample = env2.getNextSample();
+                const float fbEff = fbBase * ((1.0f - params.env2Amount)
+                                              + params.env2Amount * env2Sample);
+                env3Level = env3.getNextSample();
+
                 // The loop runs on the mono sum; its return is added equally
                 // L/R (mono loop per voice — dual stereo loops is a tracked
                 // v2 idea).
                 const float mono = 0.5f * (l + r);
-                const float fbComponent = loop.processSample (mono) - mono;
+                const float fbComponent = loop.processSample (mono, fbEff) - mono;
 
                 const float amp = level * env1.getNextSample();
                 lastEnvLevel = amp;
@@ -176,7 +226,9 @@ private:
 
     SupersawOscillator osc;
     TunedFeedbackLoop loop;
-    juce::ADSR env1;
+    juce::ADSR env1, env2, env3;
+    juce::SmoothedValue<float> fbBaseSmoothed { 0.0f };
+    float env3Level = 0.0f;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedFreq { 440.0f };
 
     VoiceParams params;

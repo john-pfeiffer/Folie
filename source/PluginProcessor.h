@@ -65,6 +65,16 @@ private:
         std::atomic<float>* env1D = nullptr;
         std::atomic<float>* env1S = nullptr;
         std::atomic<float>* env1R = nullptr;
+        std::atomic<float>* env2A = nullptr;
+        std::atomic<float>* env2D = nullptr;
+        std::atomic<float>* env2S = nullptr;
+        std::atomic<float>* env2R = nullptr;
+        std::atomic<float>* env2Amt = nullptr;
+        std::atomic<float>* env3A = nullptr;
+        std::atomic<float>* env3D = nullptr;
+        std::atomic<float>* env3S = nullptr;
+        std::atomic<float>* env3R = nullptr;
+        std::atomic<float>* env3Amt = nullptr;
         std::atomic<float>* polyphony = nullptr;
         std::atomic<float>* glide = nullptr;
         std::atomic<float>* master = nullptr;

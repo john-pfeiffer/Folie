@@ -21,8 +21,14 @@ private:
     SectionPanel loopSection { "FEEDBACK LOOP" };
     Knob fbGain, fbKeytrack, fbTune, fbFilterMode, fbCutoff, fbReso, fbDrive;
 
-    SectionPanel envSection { "AMP ENVELOPE" };
+    SectionPanel envSection { "AMP ENV" };
     Knob attack, decay, sustain, release;
+
+    SectionPanel env2Section { "FEEDBACK ENV" };
+    Knob fbAttack, fbDecay, fbSustain, fbRelease, fbAmount;
+
+    SectionPanel env3Section { "CUTOFF ENV" };
+    Knob cutAttack, cutDecay, cutSustain, cutRelease, cutAmount;
 
     SectionPanel globalSection { "GLOBAL" };
     Knob ceiling, polyphony, glide, master;
