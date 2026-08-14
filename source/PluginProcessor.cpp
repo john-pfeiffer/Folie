@@ -20,6 +20,18 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.fbReso       = apvts.getRawParameterValue (ParamIDs::fbReso);
     raw.fbDrive      = apvts.getRawParameterValue (ParamIDs::fbDrive);
     raw.limiterCeiling = apvts.getRawParameterValue (ParamIDs::limiterCeiling);
+    raw.chorusOn      = apvts.getRawParameterValue (ParamIDs::chorusOn);
+    raw.chorusRate    = apvts.getRawParameterValue (ParamIDs::chorusRate);
+    raw.chorusDepth   = apvts.getRawParameterValue (ParamIDs::chorusDepth);
+    raw.chorusMix     = apvts.getRawParameterValue (ParamIDs::chorusMix);
+    raw.delayOn       = apvts.getRawParameterValue (ParamIDs::delayOn);
+    raw.delayTime     = apvts.getRawParameterValue (ParamIDs::delayTime);
+    raw.delayFeedback = apvts.getRawParameterValue (ParamIDs::delayFeedback);
+    raw.delayMix      = apvts.getRawParameterValue (ParamIDs::delayMix);
+    raw.reverbOn      = apvts.getRawParameterValue (ParamIDs::reverbOn);
+    raw.reverbSize    = apvts.getRawParameterValue (ParamIDs::reverbSize);
+    raw.reverbDamp    = apvts.getRawParameterValue (ParamIDs::reverbDamp);
+    raw.reverbMix     = apvts.getRawParameterValue (ParamIDs::reverbMix);
     raw.env1A     = apvts.getRawParameterValue (ParamIDs::env1Attack);
     raw.env1D     = apvts.getRawParameterValue (ParamIDs::env1Decay);
     raw.env1S     = apvts.getRawParameterValue (ParamIDs::env1Sustain);
@@ -73,10 +85,30 @@ EngineParams FolieAudioProcessor::gatherParams() const
     return p;
 }
 
+FxParams FolieAudioProcessor::gatherFxParams() const
+{
+    FxParams p;
+    p.chorusOn      = raw.chorusOn->load() > 0.5f;
+    p.chorusRateHz  = raw.chorusRate->load();
+    p.chorusDepth   = raw.chorusDepth->load() * 0.01f;
+    p.chorusMix     = raw.chorusMix->load() * 0.01f;
+    p.delayOn       = raw.delayOn->load() > 0.5f;
+    p.delayTimeMs   = raw.delayTime->load();
+    p.delayFeedback = raw.delayFeedback->load() * 0.01f;
+    p.delayMix      = raw.delayMix->load() * 0.01f;
+    p.reverbOn      = raw.reverbOn->load() > 0.5f;
+    p.reverbSize    = raw.reverbSize->load() * 0.01f;
+    p.reverbDamp    = raw.reverbDamp->load() * 0.01f;
+    p.reverbMix     = raw.reverbMix->load() * 0.01f;
+    return p;
+}
+
 void FolieAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate);
     engine.setParams (gatherParams());
+    fx.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 2 });
+    fx.setParams (gatherFxParams());
     masterGain.reset (sampleRate, 0.02);
 
     limiter.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 2 });
@@ -96,6 +128,9 @@ void FolieAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     buffer.clear();
     engine.setParams (gatherParams());
     engine.renderBlock (buffer, midi);
+
+    fx.setParams (gatherFxParams());
+    fx.process (buffer);
 
     const float masterDb = raw.master->load();
     masterGain.setTargetValue (masterDb <= -59.9f ? 0.0f

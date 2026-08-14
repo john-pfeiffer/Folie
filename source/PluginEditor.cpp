@@ -30,6 +30,18 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
       cutSustain (p.apvts, ParamIDs::env3Sustain),
       cutRelease (p.apvts, ParamIDs::env3Release),
       cutAmount (p.apvts, ParamIDs::env3Amount),
+      chorusOn (p.apvts, ParamIDs::chorusOn),
+      chorusRate (p.apvts, ParamIDs::chorusRate),
+      chorusDepth (p.apvts, ParamIDs::chorusDepth),
+      chorusMix (p.apvts, ParamIDs::chorusMix),
+      delayOn (p.apvts, ParamIDs::delayOn),
+      delayTime (p.apvts, ParamIDs::delayTime),
+      delayFeedback (p.apvts, ParamIDs::delayFeedback),
+      delayMix (p.apvts, ParamIDs::delayMix),
+      reverbOn (p.apvts, ParamIDs::reverbOn),
+      reverbSize (p.apvts, ParamIDs::reverbSize),
+      reverbDamp (p.apvts, ParamIDs::reverbDamp),
+      reverbMix (p.apvts, ParamIDs::reverbMix),
       ceiling (p.apvts, ParamIDs::limiterCeiling),
       polyphony (p.apvts, ParamIDs::polyphony),
       glide (p.apvts, ParamIDs::glideTime),
@@ -71,6 +83,24 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     env3Section.addItem (cutAmount);
     addAndMakeVisible (env3Section);
 
+    chorusSection.addItem (chorusOn);
+    chorusSection.addItem (chorusRate);
+    chorusSection.addItem (chorusDepth);
+    chorusSection.addItem (chorusMix);
+    addAndMakeVisible (chorusSection);
+
+    delaySection.addItem (delayOn);
+    delaySection.addItem (delayTime);
+    delaySection.addItem (delayFeedback);
+    delaySection.addItem (delayMix);
+    addAndMakeVisible (delaySection);
+
+    reverbSection.addItem (reverbOn);
+    reverbSection.addItem (reverbSize);
+    reverbSection.addItem (reverbDamp);
+    reverbSection.addItem (reverbMix);
+    addAndMakeVisible (reverbSection);
+
     globalSection.addItem (ceiling);
     globalSection.addItem (polyphony);
     globalSection.addItem (glide);
@@ -100,7 +130,7 @@ void FolieAudioProcessorEditor::resized()
     auto area = getLocalBounds().reduced (8);
     area.removeFromTop (32);
 
-    const int rowHeight = area.getHeight() / 4;
+    const int rowHeight = area.getHeight() / 5;
     oscSection.setBounds (area.removeFromTop (rowHeight));
     loopSection.setBounds (area.removeFromTop (rowHeight));
 
@@ -109,6 +139,13 @@ void FolieAudioProcessorEditor::resized()
     envSection.setBounds (envRow.removeFromLeft (envRow.getWidth() * 4 / 14));
     env2Section.setBounds (envRow.removeFromLeft (envRow.getWidth() / 2));
     env3Section.setBounds (envRow);
+
+    // FX row: CHORUS | DELAY | REVERB, 4 slots each.
+    auto fxRow = area.removeFromTop (rowHeight);
+    const int fxWidth = fxRow.getWidth() / 3;
+    chorusSection.setBounds (fxRow.removeFromLeft (fxWidth));
+    delaySection.setBounds (fxRow.removeFromLeft (fxWidth));
+    reverbSection.setBounds (fxRow);
 
     globalSection.setBounds (area);
 }

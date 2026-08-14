@@ -4,6 +4,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include "dsp/FxChain.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/TunedFeedbackLoop.h"
 
@@ -342,6 +343,94 @@ void testCutoffEnvelopeStability()
     auto out = render (engine, events, 6.0);
     check (allFinite (out, 20.0f), "env3: extreme swept-cutoff render stays finite");
 }
+// Renders a short poly phrase and returns it (shared input for FX tests).
+juce::AudioBuffer<float> renderDryPhrase (double seconds)
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+    engine.setParams (defaultParams());
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 48, 0.8f) },
+        { 2000, juce::MidiMessage::noteOn (1, 55, 0.8f) },
+        { 40000, juce::MidiMessage::noteOff (1, 48) },
+        { 40000, juce::MidiMessage::noteOff (1, 55) },
+    };
+    return render (engine, events, seconds);
+}
+
+void processThroughFx (juce::AudioBuffer<float>& buffer, const FxParams& p)
+{
+    FxChain fxChain;
+    fxChain.prepare ({ kSampleRate, (juce::uint32) kBlockSize, 2 });
+    fxChain.setParams (p);
+
+    juce::AudioBuffer<float> block (2, kBlockSize);
+    for (int start = 0; start < buffer.getNumSamples(); start += kBlockSize)
+    {
+        const int n = juce::jmin (kBlockSize, buffer.getNumSamples() - start);
+        block.setSize (2, n, false, false, true);
+        for (int ch = 0; ch < 2; ++ch)
+            block.copyFrom (ch, 0, buffer, ch, start, n);
+        fxChain.setParams (p);
+        fxChain.process (block);
+        for (int ch = 0; ch < 2; ++ch)
+            buffer.copyFrom (ch, start, block, ch, 0, n);
+    }
+}
+
+// All FX off must be a clean passthrough (bit-for-bit is too strict across the
+// chorus's internal mixer, but RMS must match within ~1 dB and stay finite).
+void testFxBypassPassthrough()
+{
+    auto dry = renderDryPhrase (2.0);
+    auto processed = renderDryPhrase (2.0);
+
+    FxParams p; // all off by default
+    processThroughFx (processed, p);
+
+    check (allFinite (processed, 4.0f), "fx bypass: finite");
+    const float dryRms = dry.getRMSLevel (0, 0, dry.getNumSamples());
+    const float wetRms = processed.getRMSLevel (0, 0, processed.getNumSamples());
+    const float ratioDb = std::abs (juce::Decibels::gainToDecibels (wetRms / juce::jmax (1.0e-9f, dryRms)));
+    std::printf ("      fx bypass: RMS delta %.3f dB\n", ratioDb);
+    check (ratioDb < 1.0f, "fx bypass: all-off chain passes signal within 1 dB");
+}
+
+// Everything on at extreme settings must stay finite and bounded.
+void testFxExtremes()
+{
+    auto buffer = renderDryPhrase (6.0);
+
+    FxParams p;
+    p.chorusOn = true;  p.chorusRateHz = 8.0f; p.chorusDepth = 1.0f; p.chorusMix = 1.0f;
+    p.delayOn = true;   p.delayTimeMs = 2000.0f; p.delayFeedback = 0.95f; p.delayMix = 1.0f;
+    p.reverbOn = true;  p.reverbSize = 1.0f; p.reverbDamp = 0.0f; p.reverbMix = 1.0f;
+    processThroughFx (buffer, p);
+
+    check (allFinite (buffer, 20.0f), "fx extremes: all-on maxed chain stays finite & bounded");
+}
+
+// The delay must actually delay: with a 500 ms delay and the dry phrase ending
+// before the render does, the late window must carry echo energy that the dry
+// render doesn't have.
+void testDelayProducesTail()
+{
+    auto dry = renderDryPhrase (4.0);
+    auto wet = renderDryPhrase (4.0);
+
+    FxParams p;
+    p.delayOn = true;
+    p.delayTimeMs = 500.0f;
+    p.delayFeedback = 0.6f;
+    p.delayMix = 1.0f;
+    processThroughFx (wet, p);
+
+    const float dryLate = rmsOfTail (dry, 1.0);
+    const float wetLate = rmsOfTail (wet, 1.0);
+    std::printf ("      delay tail: late RMS dry %.5f vs delayed %.5f\n", dryLate, wetLate);
+    check (wetLate > dryLate * 2.0f + 1.0e-5f, "delay: echoes persist after the dry phrase ends");
+}
 } // namespace
 
 int main()
@@ -354,6 +443,9 @@ int main()
     testFeedbackTailGated();
     testFeedbackEnvelopeModulates();
     testCutoffEnvelopeStability();
+    testFxBypassPassthrough();
+    testFxExtremes();
+    testDelayProducesTail();
 
     std::printf (failures == 0 ? "All tests passed.\n" : "%d test(s) FAILED.\n", failures);
     return failures == 0 ? 0 : 1;

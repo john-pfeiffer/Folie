@@ -40,6 +40,20 @@ inline constexpr auto env3Sustain = "env3Sustain";
 inline constexpr auto env3Release = "env3Release";
 inline constexpr auto env3Amount  = "env3Amount";
 
+// FX chain
+inline constexpr auto chorusOn      = "chorusOn";
+inline constexpr auto chorusRate    = "chorusRate";
+inline constexpr auto chorusDepth   = "chorusDepth";
+inline constexpr auto chorusMix     = "chorusMix";
+inline constexpr auto delayOn       = "delayOn";
+inline constexpr auto delayTime     = "delayTime";
+inline constexpr auto delayFeedback = "delayFeedback";
+inline constexpr auto delayMix      = "delayMix";
+inline constexpr auto reverbOn      = "reverbOn";
+inline constexpr auto reverbSize    = "reverbSize";
+inline constexpr auto reverbDamp    = "reverbDamp";
+inline constexpr auto reverbMix     = "reverbMix";
+
 // Global
 inline constexpr auto limiterCeiling = "limiterCeiling";
 inline constexpr auto polyphony    = "polyphony";
