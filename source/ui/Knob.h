@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../params/ParameterDescriptions.h"
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 // Rotary slider + name label + APVTS attachment in one bundle. The attachment
@@ -10,6 +12,7 @@ public:
     Knob (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramID)
     {
         slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        slider.setTooltip (describeParam (paramID));
         slider.setMouseDragSensitivity (120);
         slider.setScrollWheelEnabled (true);
         slider.setSliderSnapsToMousePosition (false);

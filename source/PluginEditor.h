@@ -77,6 +77,7 @@ private:
     Knob voiceMode, polyphony, glide, master;
 
     juce::Rectangle<int> rackLabelArea;
+    juce::TooltipWindow tooltipWindow { this, 400 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FolieAudioProcessorEditor)
 };

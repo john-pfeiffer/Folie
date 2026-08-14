@@ -66,9 +66,13 @@ public:
             const float freq = baseFreq * (1.0f + pos * spread);
             increment[i] = juce::jlimit (0.0f, 0.45f, (float) (freq / sr));
 
-            // Center saw(s) full level, outer saws scaled by blend.
-            const float centerness = 1.0f - std::abs (pos);
-            const float gain = juce::jmap (blend, centerness, 1.0f);
+            // Exponential side taper: 0% blend = solo center saw, 100% = full
+            // wall. (An earlier linear taper left inner saws at ~2/3 level at
+            // blend 0 and the knob read as doing nothing.)
+            const float gain = numSaws == 1
+                                   ? 1.0f
+                                   : std::pow (juce::jmax (1.0e-3f, blend),
+                                               2.0f * std::abs (pos));
 
             // Equal-power pan by position * width.
             const float pan = pos * width; // [-1, 1]

@@ -10,6 +10,9 @@ public:
     explicit SampleLoader (FolieAudioProcessor& p) : processor (p)
     {
         loadButton.setButtonText ("Load...");
+        loadButton.setTooltip ("Load an audio clip (wav/aiff/flac/ogg/mp3, up to 10 s) as the "
+                               "loop exciter - or just drop a file anywhere on Folie. "
+                               "The clip saves with your project.");
         loadButton.onClick = [this]
         {
             chooser = std::make_unique<juce::FileChooser> (

@@ -29,11 +29,21 @@ COPY_PLUGIN_AFTER_BUILD does the copying. CI never sets this flag.
 
 ## Rules
 
-- **Zero post FX by design** (post-initial-build handoff): no chorus/delay/reverb —
-  ever. The in-loop saturator/damping filter and osc stereo width stay (sound
-  generation). The only bus stage is the fixed, parameterless safety soft-clip.
-- **Per-voice principle**: the feedback loop, its saturator, and all three envelopes
-  run per voice, never on the sum. No optimization may share them across voices.
+- **Zero post FX on the bus by design** (post-initial-build handoff): no chorus/delay/
+  reverb after the voice sum — ever. The only bus stage is the fixed, parameterless
+  safety soft-clip. IN-LOOP processing is sound generation and fair game: the loop
+  rack (filter/saturator/echo/diffuser/ringmod, owner-commissioned) lives inside each
+  voice's feedback loop.
+- **Per-voice principle**: the feedback loop, its whole FX rack, and all three
+  envelopes run per voice, never on the sum. No optimization may share them.
+- **Loop safety is layered and hidden**: an always-on transparent limiter (knee ±1,
+  ceiling ±1.5) and DC blocker sit in every loop after the rack — never remove them;
+  they are what makes >100% feedback and a bypassed saturator safe.
+- Plugin state = the APVTS tree + these root properties: `uiWidth`/`uiHeight`,
+  `loopOrder` (rack order — deliberately NOT a parameter), `sampleData`/`sampleRate`/
+  `sampleName` (exciter clip as FLAC/Base64). Nothing else is stateful.
+- Every parameter must have a tooltip in `source/params/ParameterDescriptions.h` —
+  the coverage test fails the build otherwise.
 
 - Every parameter ID lives in `source/params/ParameterIDs.h` and is registered in
   `createParameterLayout()` — never inline parameter strings anywhere else.

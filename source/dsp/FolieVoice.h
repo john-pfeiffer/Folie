@@ -58,19 +58,24 @@ struct VoiceParams
     float env1Sustain   = 0.8f; // 0..1
     float env1ReleaseMs = 300.0f;
 
-    // ENV2 -> feedback gain, additive per spec: fbEff = fbGain + amt * env2
+    // ENV2 -> feedback gain, additive per spec: fbEff = fbGain + amt * env2.
+    // Defaults give every note a feedback bloom that settles (audible out of
+    // the box; peaks ~105% clamped, relaxes to ~85%).
     float env2AttackMs  = 5.0f;
     float env2DecayMs   = 400.0f;
-    float env2Sustain   = 1.0f;
+    float env2Sustain   = 0.35f;
     float env2ReleaseMs = 300.0f;
-    float env2Amount    = 0.0f; // 0..1
+    float env2Amount    = 0.3f; // 0..1
 
-    // ENV3 -> loop cutoff: cutEff = fbCutoff * 2^(5 * amt * env3), amt bipolar
+    // ENV3 -> loop cutoff: cutEff = fbCutoff * 2^(5 * amt * env3), amt bipolar.
+    // The shift is strongest at the envelope PEAK: positive amount = note
+    // starts bright and damps toward sustain (plucked-string decay — the
+    // default), negative = starts choked and opens up.
     float env3AttackMs  = 5.0f;
     float env3DecayMs   = 600.0f;
-    float env3Sustain   = 1.0f;
+    float env3Sustain   = 0.25f;
     float env3ReleaseMs = 300.0f;
-    float env3Amount    = 0.0f; // -1..+1
+    float env3Amount    = 0.35f; // -1..+1
 
     static constexpr float fbBaseHz = 261.63f; // loop anchor at 0% keytrack
 };

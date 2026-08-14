@@ -3,7 +3,9 @@
 # exists from day one so the ctest wiring in CI is proven with the scaffold.
 juce_add_console_app(FolieTests PRODUCT_NAME "FolieTests")
 
-target_sources(FolieTests PRIVATE RenderTests.cpp)
+target_sources(FolieTests PRIVATE
+    RenderTests.cpp
+    ${CMAKE_SOURCE_DIR}/source/params/ParameterLayout.cpp)
 target_include_directories(FolieTests PRIVATE ${CMAKE_SOURCE_DIR}/source)
 
 target_compile_definitions(FolieTests PRIVATE
@@ -13,6 +15,7 @@ target_compile_definitions(FolieTests PRIVATE
 target_link_libraries(FolieTests PRIVATE
     juce::juce_dsp
     juce::juce_audio_formats
+    juce::juce_audio_processors
     juce::juce_audio_basics
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)

@@ -15,6 +15,7 @@ public:
         : processor (proc), moduleID (id)
     {
         enable.setButtonText (title);
+        enable.setTooltip (describeParam (enableParamID));
         addAndMakeVisible (enable);
         enableAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
             proc.apvts, enableParamID, enable);

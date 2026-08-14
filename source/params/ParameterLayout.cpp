@@ -198,12 +198,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Decay, 1 }, "FB Decay",
                                envTimeRange(), 400.0f, msAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Sustain, 1 }, "FB Sustain",
-                               percentRange(), 100.0f, percentAttributes()),
+                               percentRange(), 35.0f, percentAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Release, 1 }, "FB Release",
                                envTimeRange(), 300.0f, msAttributes()),
         // 0% = feedback stays at the knob; 100% = fully shaped by this ADSR.
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Amount, 1 }, "FB Env Amt",
-                               percentRange(), 0.0f, percentAttributes()));
+                               percentRange(), 30.0f, percentAttributes()));
 
     auto env3 = std::make_unique<Group> ("env3", "Loop Filter Envelope", "|");
     env3->addChild (
@@ -212,12 +212,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env3Decay, 1 }, "Cut Decay",
                                envTimeRange(), 600.0f, msAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env3Sustain, 1 }, "Cut Sustain",
-                               percentRange(), 100.0f, percentAttributes()),
+                               percentRange(), 25.0f, percentAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env3Release, 1 }, "Cut Release",
                                envTimeRange(), 300.0f, msAttributes()),
         // Bipolar: +/-100% sweeps the loop cutoff up to +/-5 octaves.
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env3Amount, 1 }, "Cut Env Amt",
-                               juce::NormalisableRange<float> { -100.0f, 100.0f, 0.0f }, 0.0f,
+                               juce::NormalisableRange<float> { -100.0f, 100.0f, 0.0f }, 35.0f,
                                percentAttributes()));
 
     auto global = std::make_unique<Group> ("global", "Global", "|");

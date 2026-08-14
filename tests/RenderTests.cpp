@@ -9,6 +9,8 @@
 #include "dsp/SynthEngine.h"
 #include "dsp/TunedFeedbackLoop.h"
 #include "params/LoopOrder.h"
+#include "params/ParameterDescriptions.h"
+#include "params/ParameterLayout.h"
 
 #include <chrono>
 #include <cstdio>
@@ -437,9 +439,10 @@ void testFeedbackIsAudible()
     check (hotRms > dryRms * 1.25f, "fb audibility: hot loop adds >1.25x RMS over dry saws");
 }
 
-// Refactor guard: the default patch must sound the same through the modular
-// chain as it did through the hard-wired filter->tanh loop. Reference values
-// captured from the pre-refactor build (steady RMS 0.196027, peak 0.435825).
+// Refactor guard: the default patch through the modular chain, re-baselined
+// after the intentional sound changes of the Loop Rack round (exponential
+// Blend taper + showcase ENV2/ENV3 defaults): steady RMS 0.218514,
+// peak 0.455598. Bump these ONLY for deliberate default-sound changes.
 void testGoldenDefaults()
 {
     SynthEngine engine;
@@ -453,11 +456,11 @@ void testGoldenDefaults()
 
     const float rms = out.getRMSLevel (0, (int) kSampleRate, (int) kSampleRate * 2);
     const float peak = out.getMagnitude (0, out.getNumSamples());
-    std::printf ("      golden: steady RMS %.6f (ref 0.196027), peak %.6f (ref 0.435825)\n",
+    std::printf ("      golden: steady RMS %.6f (ref 0.218514), peak %.6f (ref 0.455598)\n",
                  rms, peak);
-    check (std::abs (rms - 0.196027f) < 0.196027f * 0.1f,
-           "golden: default patch RMS within 10% of pre-refactor reference");
-    check (peak < 0.436f * 1.15f, "golden: default patch peak in family with reference");
+    check (std::abs (rms - 0.218514f) < 0.218514f * 0.1f,
+           "golden: default patch RMS within 10% of reference");
+    check (peak < 0.456f * 1.15f, "golden: default patch peak in family with reference");
 }
 
 // The new critical case: with EVERY module bypassed the loop is linear, so at
@@ -883,6 +886,135 @@ void testSampleSwapWhileRendering()
     check (out.getMagnitude (0, out.getNumSamples()) > 0.01f, "sample swap: produces signal");
 }
 
+// Every registered parameter must have a tooltip — adding a knob without
+// explaining it fails the build.
+void testTooltipCoverage()
+{
+    struct DummyProcessor : juce::AudioProcessor
+    {
+        void prepareToPlay (double, int) override {}
+        void releaseResources() override {}
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+        bool hasEditor() const override { return false; }
+        const juce::String getName() const override { return "dummy"; }
+        bool acceptsMidi() const override { return false; }
+        bool producesMidi() const override { return false; }
+        double getTailLengthSeconds() const override { return 0.0; }
+        int getNumPrograms() override { return 1; }
+        int getCurrentProgram() override { return 0; }
+        void setCurrentProgram (int) override {}
+        const juce::String getProgramName (int) override { return {}; }
+        void changeProgramName (int, const juce::String&) override {}
+        void getStateInformation (juce::MemoryBlock&) override {}
+        void setStateInformation (const void*, int) override {}
+    };
+
+    DummyProcessor proc;
+    juce::AudioProcessorValueTreeState apvts (proc, nullptr, "T", createParameterLayout());
+
+    int total = 0, missing = 0;
+    for (auto* p : proc.getParameters())
+    {
+        if (auto* withID = dynamic_cast<juce::AudioProcessorParameterWithID*> (p))
+        {
+            ++total;
+            if (describeParam (withID->paramID).isEmpty())
+            {
+                std::printf ("      MISSING tooltip: %s\n", withID->paramID.toRawUTF8());
+                ++missing;
+            }
+        }
+    }
+    std::printf ("      tooltips: %d/%d parameters described\n", total - missing, total);
+    check (total > 40 && missing == 0, "tooltips: every registered parameter has a description");
+}
+
+// Out-of-the-box audibility: the ENV2/ENV3 default amounts must make the
+// note's opening measurably different from the same patch with amounts
+// zeroed — the fix for "I don't understand the env options" is that the
+// defaults DO something you can hear.
+void testEnvDefaultsAudible()
+{
+    auto renderNote = [] (bool zeroAmounts)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+        auto p = defaultParams();
+        if (zeroAmounts)
+        {
+            p.voice.env2Amount = 0.0f;
+            p.voice.env3Amount = 0.0f;
+        }
+        engine.setParams (p);
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },
+        };
+        return render (engine, events, 1.2);
+    };
+
+    const auto withEnvs = renderNote (false);
+    const auto without = renderNote (true);
+
+    // Compare the note's first second sample-by-sample: identical phases
+    // (deterministic per-voice seeds), so the difference signal isolates
+    // exactly what the envelope defaults contribute.
+    const int n = (int) kSampleRate;
+    float diffEnergy = 0.0f, refEnergy = 0.0f;
+    const float* a = withEnvs.getReadPointer (0);
+    const float* b = without.getReadPointer (0);
+    for (int i = 0; i < n; ++i)
+    {
+        const float d = a[i] - b[i];
+        diffEnergy += d * d;
+        refEnergy += b[i] * b[i];
+    }
+    const float relative = std::sqrt (diffEnergy / juce::jmax (1.0e-12f, refEnergy));
+    std::printf ("      env defaults: relative difference vs zeroed amounts %.3f\n", relative);
+    check (relative > 0.15f,
+           "env defaults: ENV2/ENV3 audibly shape the note at pure defaults");
+}
+
+// Blend must be dramatic: 0% collapses to the solo center saw (near-zero
+// stereo side signal), 100% is the full beating wall.
+void testBlendIsAudible()
+{
+    auto renderWithBlend = [] (float blend)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+        auto p = defaultParams();
+        p.voice.blend = blend;
+        p.voice.fbGain = 0.0f;
+        p.voice.env1Sustain = 1.0f;
+        engine.setParams (p);
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 57, 0.9f) },
+        };
+        return render (engine, events, 2.0);
+    };
+
+    auto sideRms = [] (const juce::AudioBuffer<float>& b)
+    {
+        float sum = 0.0f;
+        const auto* l = b.getReadPointer (0);
+        const auto* r = b.getReadPointer (1);
+        const int start = b.getNumSamples() / 2;
+        for (int i = start; i < b.getNumSamples(); ++i)
+        {
+            const float s = l[i] - r[i];
+            sum += s * s;
+        }
+        return std::sqrt (sum / (float) (b.getNumSamples() - start));
+    };
+
+    const float sideAtZero = sideRms (renderWithBlend (0.0f));
+    const float sideAtFull = sideRms (renderWithBlend (1.0f));
+    std::printf ("      blend: side RMS at 0%% %.5f vs 100%% %.5f\n", sideAtZero, sideAtFull);
+    check (sideAtZero < sideAtFull * 0.1f,
+           "blend: 0% collapses to the centered solo saw; 100% is the wide wall");
+}
+
 // The fixed output soft-clip: bit-exact below the -1 dBFS knee, bounded below
 // 0 dBFS for any input.
 void testSafetyClip()
@@ -921,6 +1053,9 @@ int main()
     testSampleStateRoundTrip();
     testSampleExciterRepitch();
     testSampleSwapWhileRendering();
+    testTooltipCoverage();
+    testEnvDefaultsAudible();
+    testBlendIsAudible();
     testVoiceModes();
     testSafetyClip();
 
