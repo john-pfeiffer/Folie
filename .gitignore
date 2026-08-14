@@ -1,0 +1,19 @@
+# Build directories
+build*/
+cmake-build-*/
+out/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+compile_commands.json
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ccache
+.ccache/
