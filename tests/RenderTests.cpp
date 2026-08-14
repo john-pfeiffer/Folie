@@ -7,6 +7,7 @@
 #include "dsp/SoftClip.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/TunedFeedbackLoop.h"
+#include "params/LoopOrder.h"
 
 #include <chrono>
 #include <cstdio>
@@ -476,6 +477,73 @@ void testSaturatorFlavors()
     }
 }
 
+// Order sanitizing: any junk becomes a valid permutation; round-trips hold.
+void testLoopOrderSanitizer()
+{
+    using namespace LoopOrder;
+
+    check (sanitize ({ 4, 4, 4, 4, 4 }) == Order { 4, 0, 1, 2, 3 },
+           "loop order: duplicates collapse, missing appended canonically");
+    check (fromString ("2,0,1") == Order { 2, 0, 1, 3, 4 },
+           "loop order: short strings padded canonically");
+    check (fromString ("garbage") == Order { 0, 1, 2, 3, 4 },
+           "loop order: garbage becomes canonical");
+
+    const Order o { 3, 1, 4, 0, 2 };
+    check (unpack (pack (o)) == o, "loop order: pack/unpack round-trips");
+    check (fromString (toString (o)) == o, "loop order: string round-trips");
+}
+
+// Reordering the rack every block while 8 voices scream must never produce
+// non-finite output (module state carries across reorders; limiter + DC
+// blocker bound any step discontinuities).
+void testReorderMidRender()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.fbGain = 1.05f;
+    p.voice.env1Sustain = 1.0f;
+    p.polyphony = 8;
+
+    std::vector<std::pair<int, juce::MidiMessage>> events;
+    for (int i = 0; i < 8; ++i)
+        events.emplace_back (0, juce::MidiMessage::noteOn (1, 40 + i * 4, 1.0f));
+
+    const int totalSamples = (int) kSampleRate * 4;
+    juce::AudioBuffer<float> out (2, totalSamples);
+    out.clear();
+    juce::AudioBuffer<float> block (2, kBlockSize);
+
+    const LoopOrder::Order permutations[] = {
+        { 0, 1, 2, 3, 4 }, { 1, 0, 2, 3, 4 }, { 4, 3, 2, 1, 0 },
+        { 2, 4, 0, 1, 3 }, { 1, 3, 0, 4, 2 },
+    };
+    int permIndex = 0;
+
+    for (int start = 0; start < totalSamples; start += kBlockSize)
+    {
+        p.voice.loopOrder = permutations[(size_t) (permIndex++ % 5)];
+        engine.setParams (p);
+
+        const int n = juce::jmin (kBlockSize, totalSamples - start);
+        juce::MidiBuffer midi;
+        if (start == 0)
+            for (const auto& [time, msg] : events)
+                midi.addEvent (msg, time);
+
+        block.setSize (2, n, false, false, true);
+        block.clear();
+        engine.renderBlock (block, midi);
+        for (int ch = 0; ch < 2; ++ch)
+            out.copyFrom (ch, start, block, ch, 0, n);
+    }
+
+    check (allFinite (out, 20.0f), "reorder: rack reshuffled every block stays finite");
+    check (out.getMagnitude (0, out.getNumSamples()) > 0.01f, "reorder: still producing signal");
+}
+
 // Voice modes: Mono holds one voice with last-note priority; Legato changes
 // pitch without retriggering and the whole voice (including the tuned loop)
 // glides to the new note.
@@ -571,6 +639,8 @@ int main()
     testGoldenDefaults();
     testAllModulesBypassedStability();
     testSaturatorFlavors();
+    testLoopOrderSanitizer();
+    testReorderMidRender();
     testVoiceModes();
     testSafetyClip();
 

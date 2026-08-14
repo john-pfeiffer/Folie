@@ -26,6 +26,7 @@ struct VoiceParams
     bool fxFilterOn = true;
     bool fxSatOn    = true;
     int  fxSatMode  = 0;        // 0 tanh, 1 fold, 2 clip
+    std::array<juce::uint8, numLoopModules> loopOrder { 0, 1, 2, 3, 4 };
 
     float env1AttackMs  = 5.0f;
     float env1DecayMs   = 200.0f;
@@ -92,6 +93,7 @@ public:
         if (p.fxFilterOn) mask |= LoopFxChain::bit (LoopModuleID::filter);
         if (p.fxSatOn)    mask |= LoopFxChain::bit (LoopModuleID::saturator);
         fx.setEnabled (mask);
+        fx.setOrder (p.loopOrder);
         fx.filter.setShape (p.fbBandpass, p.fbReso);
         fx.filter.setCutoff (p.fbCutoff);
         fx.saturator.set ((Saturator::Mode) p.fxSatMode, p.fbDriveDb);

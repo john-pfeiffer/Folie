@@ -61,6 +61,7 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.fxFilterOn    = raw.fxFilterOn->load() > 0.5f;
     p.voice.fxSatOn       = raw.fxSatOn->load() > 0.5f;
     p.voice.fxSatMode     = (int) raw.fxSatMode->load();
+    p.voice.loopOrder     = LoopOrder::unpack (packedOrder.load (std::memory_order_acquire));
     p.voice.env1AttackMs  = raw.env1A->load();
     p.voice.env1DecayMs   = raw.env1D->load();
     p.voice.env1Sustain   = raw.env1S->load() * 0.01f;
@@ -129,8 +130,46 @@ void FolieAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 void FolieAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    {
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+
+            // replaceState swaps the whole tree, so non-parameter state must
+            // be re-bridged to the audio thread explicitly.
+            const auto order = LoopOrder::fromString (
+                apvts.state.getProperty ("loopOrder", LoopOrder::toString (LoopOrder::canonical)));
+            packedOrder.store (LoopOrder::pack (order), std::memory_order_release);
+        }
+    }
+}
+
+LoopOrder::Order FolieAudioProcessor::getLoopOrder() const
+{
+    return LoopOrder::fromString (
+        apvts.state.getProperty ("loopOrder", LoopOrder::toString (LoopOrder::canonical)));
+}
+
+void FolieAudioProcessor::setLoopOrder (const LoopOrder::Order& orderIn)
+{
+    const auto order = LoopOrder::sanitize (orderIn);
+    apvts.state.setProperty ("loopOrder", LoopOrder::toString (order), nullptr);
+    packedOrder.store (LoopOrder::pack (order), std::memory_order_release);
+}
+
+void FolieAudioProcessor::moveLoopModule (LoopModuleID id, int delta)
+{
+    auto order = getLoopOrder();
+    for (int i = 0; i < numLoopModules; ++i)
+    {
+        if (order[(size_t) i] == (juce::uint8) id)
+        {
+            const int j = juce::jlimit (0, numLoopModules - 1, i + delta);
+            std::swap (order[(size_t) i], order[(size_t) j]);
+            setLoopOrder (order);
+            return;
+        }
+    }
 }
 
 void FolieAudioProcessor::setSavedEditorSize (int w, int h)

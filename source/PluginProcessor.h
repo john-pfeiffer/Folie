@@ -3,6 +3,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "dsp/SynthEngine.h"
+#include "params/LoopOrder.h"
 
 class FolieAudioProcessor : public juce::AudioProcessor
 {
@@ -39,11 +40,18 @@ public:
     void setSavedEditorSize (int w, int h);
     juce::Point<int> getSavedEditorSize() const;
 
+    // Loop rack order: state property (message thread) bridged to the audio
+    // thread via a packed atomic. Message thread only.
+    LoopOrder::Order getLoopOrder() const;
+    void setLoopOrder (const LoopOrder::Order& order);
+    void moveLoopModule (LoopModuleID id, int delta);
+
 private:
     EngineParams gatherParams() const;
 
     SynthEngine engine;
     juce::SmoothedValue<float> masterGain { 0.5f };
+    std::atomic<juce::uint32> packedOrder { LoopOrder::pack (LoopOrder::canonical) };
 
     struct RawParams
     {
