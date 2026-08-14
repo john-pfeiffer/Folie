@@ -1,0 +1,81 @@
+# Release build: runs on version tags pushed to main (e.g. v0.1.0).
+# Same build + validation as build.yml, then attaches zips to a GitHub Release.
+# Signing/notarization is deferred (tracked in FOL-9) — binaries ship unsigned.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+            extra_cmake: -DCMAKE_OSX_ARCHITECTURES=arm64;x86_64
+            pluginval_url: https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
+          - name: Windows
+            os: windows-2022
+            extra_cmake: ''
+            pluginval_url: https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Configure
+        shell: bash
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra_cmake }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run DSP tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Fetch pluginval
+        shell: bash
+        run: |
+          curl -fL "${{ matrix.pluginval_url }}" -o pluginval.zip
+          unzip -o pluginval.zip
+
+      - name: pluginval (VST3)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            PV=./pluginval.app/Contents/MacOS/pluginval
+          else
+            PV=./pluginval.exe
+          fi
+          "$PV" --strictness-level 5 --verbose --timeout-ms 120000 \
+                --validate "build/Folie_artefacts/Release/VST3/Folie.vst3"
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir stage
+          cp -R "build/Folie_artefacts/Release/VST3/Folie.vst3" stage/
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cp -R "build/Folie_artefacts/Release/AU/Folie.component" stage/
+            (cd stage && zip -r "../Folie-${{ matrix.name }}-${{ github.ref_name }}.zip" .)
+          else
+            7z a "Folie-${{ matrix.name }}-${{ github.ref_name }}.zip" ./stage/*
+          fi
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Folie-${{ matrix.name }}-${{ github.ref_name }}.zip
+          generate_release_notes: true
