@@ -34,7 +34,8 @@ juce_add_plugin(Folie
 
 target_sources(Folie PRIVATE
     source/PluginProcessor.cpp
-    source/PluginEditor.cpp)
+    source/PluginEditor.cpp
+    source/params/ParameterLayout.cpp)
 
 target_include_directories(Folie PRIVATE source)
 

@@ -2,8 +2,8 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
-// Hello-world scaffold processor: a plain sine synth proving the build/CI/install
-// loop before any real DSP lands. Replaced by the supersaw engine in FOL-4.
+#include "dsp/SynthEngine.h"
+
 class FolieAudioProcessor : public juce::AudioProcessor
 {
 public:
@@ -21,7 +21,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return 10.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -32,8 +32,34 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    juce::AudioProcessorValueTreeState apvts;
+
+    // Editor size persistence (pure-function-UI rule: the state tree is the
+    // single home for everything, including UI size).
+    void setSavedEditorSize (int w, int h);
+    juce::Point<int> getSavedEditorSize() const;
+
 private:
-    juce::Synthesiser synth;
+    EngineParams gatherParams() const;
+
+    SynthEngine engine;
+    juce::SmoothedValue<float> masterGain { 0.5f };
+
+    struct RawParams
+    {
+        std::atomic<float>* sawCount = nullptr;
+        std::atomic<float>* detune = nullptr;
+        std::atomic<float>* blend = nullptr;
+        std::atomic<float>* width = nullptr;
+        std::atomic<float>* octave = nullptr;
+        std::atomic<float>* env1A = nullptr;
+        std::atomic<float>* env1D = nullptr;
+        std::atomic<float>* env1S = nullptr;
+        std::atomic<float>* env1R = nullptr;
+        std::atomic<float>* polyphony = nullptr;
+        std::atomic<float>* glide = nullptr;
+        std::atomic<float>* master = nullptr;
+    } raw;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FolieAudioProcessor)
 };

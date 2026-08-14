@@ -1,86 +1,48 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-
-namespace
-{
-struct HelloSound : public juce::SynthesiserSound
-{
-    bool appliesToNote (int) override { return true; }
-    bool appliesToChannel (int) override { return true; }
-};
-
-class HelloSineVoice : public juce::SynthesiserVoice
-{
-public:
-    bool canPlaySound (juce::SynthesiserSound* sound) override
-    {
-        return dynamic_cast<HelloSound*> (sound) != nullptr;
-    }
-
-    void startNote (int midiNoteNumber, float velocity, juce::SynthesiserSound*, int) override
-    {
-        phase = 0.0;
-        level = velocity * 0.15f;
-        auto freq = juce::MidiMessage::getMidiNoteInHertz (midiNoteNumber);
-        phaseDelta = juce::MathConstants<double>::twoPi * freq / getSampleRate();
-        env.setSampleRate (getSampleRate());
-        env.setParameters ({ 0.005f, 0.1f, 0.8f, 0.2f });
-        env.noteOn();
-    }
-
-    void stopNote (float, bool allowTailOff) override
-    {
-        if (allowTailOff)
-            env.noteOff();
-        else
-        {
-            env.reset();
-            clearCurrentNote();
-        }
-    }
-
-    void pitchWheelMoved (int) override {}
-    void controllerMoved (int, int) override {}
-
-    void renderNextBlock (juce::AudioBuffer<float>& output, int startSample, int numSamples) override
-    {
-        if (! env.isActive())
-            return;
-
-        for (int i = startSample; i < startSample + numSamples; ++i)
-        {
-            auto sample = level * env.getNextSample() * (float) std::sin (phase);
-            phase += phaseDelta;
-
-            for (int ch = 0; ch < output.getNumChannels(); ++ch)
-                output.addSample (ch, i, sample);
-
-            if (! env.isActive())
-            {
-                clearCurrentNote();
-                break;
-            }
-        }
-    }
-
-private:
-    double phase = 0.0, phaseDelta = 0.0;
-    float level = 0.0f;
-    juce::ADSR env;
-};
-} // namespace
+#include "params/ParameterIDs.h"
+#include "params/ParameterLayout.h"
 
 FolieAudioProcessor::FolieAudioProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts (*this, nullptr, "FOLIE", createParameterLayout())
 {
-    synth.addSound (new HelloSound());
-    for (int i = 0; i < 8; ++i)
-        synth.addVoice (new HelloSineVoice());
+    raw.sawCount  = apvts.getRawParameterValue (ParamIDs::oscSawCount);
+    raw.detune    = apvts.getRawParameterValue (ParamIDs::oscDetune);
+    raw.blend     = apvts.getRawParameterValue (ParamIDs::oscBlend);
+    raw.width     = apvts.getRawParameterValue (ParamIDs::oscWidth);
+    raw.octave    = apvts.getRawParameterValue (ParamIDs::oscOctave);
+    raw.env1A     = apvts.getRawParameterValue (ParamIDs::env1Attack);
+    raw.env1D     = apvts.getRawParameterValue (ParamIDs::env1Decay);
+    raw.env1S     = apvts.getRawParameterValue (ParamIDs::env1Sustain);
+    raw.env1R     = apvts.getRawParameterValue (ParamIDs::env1Release);
+    raw.polyphony = apvts.getRawParameterValue (ParamIDs::polyphony);
+    raw.glide     = apvts.getRawParameterValue (ParamIDs::glideTime);
+    raw.master    = apvts.getRawParameterValue (ParamIDs::masterVolume);
+}
+
+EngineParams FolieAudioProcessor::gatherParams() const
+{
+    EngineParams p;
+    p.voice.sawCount      = (int) raw.sawCount->load();
+    p.voice.detune        = raw.detune->load() * 0.01f;
+    p.voice.blend         = raw.blend->load() * 0.01f;
+    p.voice.width         = raw.width->load() * 0.01f;
+    p.voice.octave        = (int) raw.octave->load();
+    p.voice.env1AttackMs  = raw.env1A->load();
+    p.voice.env1DecayMs   = raw.env1D->load();
+    p.voice.env1Sustain   = raw.env1S->load() * 0.01f;
+    p.voice.env1ReleaseMs = raw.env1R->load();
+    p.polyphony           = (int) raw.polyphony->load();
+    p.glideSeconds        = raw.glide->load() * 0.001f;
+    return p;
 }
 
 void FolieAudioProcessor::prepareToPlay (double sampleRate, int)
 {
-    synth.setCurrentPlaybackSampleRate (sampleRate);
+    engine.prepare (sampleRate);
+    engine.setParams (gatherParams());
+    masterGain.reset (sampleRate, 0.02);
 }
 
 bool FolieAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -92,17 +54,42 @@ bool FolieAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 void FolieAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+
     buffer.clear();
-    synth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());
+    engine.setParams (gatherParams());
+    engine.renderBlock (buffer, midi);
+
+    const float masterDb = raw.master->load();
+    masterGain.setTargetValue (masterDb <= -59.9f ? 0.0f
+                                                  : juce::Decibels::decibelsToGain (masterDb));
+    masterGain.applyGain (buffer, buffer.getNumSamples());
 }
 
 void FolieAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // No parameters yet — state becomes the APVTS tree in FOL-4.
-    juce::MemoryOutputStream (destData, true).writeInt (1);
+    auto state = apvts.copyState();
+    if (auto xml = state.createXml())
+        copyXmlToBinary (*xml, destData);
 }
 
-void FolieAudioProcessor::setStateInformation (const void*, int) {}
+void FolieAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+{
+    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+        if (xml->hasTagName (apvts.state.getType()))
+            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+}
+
+void FolieAudioProcessor::setSavedEditorSize (int w, int h)
+{
+    apvts.state.setProperty ("uiWidth", w, nullptr);
+    apvts.state.setProperty ("uiHeight", h, nullptr);
+}
+
+juce::Point<int> FolieAudioProcessor::getSavedEditorSize() const
+{
+    return { (int) apvts.state.getProperty ("uiWidth", 780),
+             (int) apvts.state.getProperty ("uiHeight", 540) };
+}
 
 juce::AudioProcessorEditor* FolieAudioProcessor::createEditor()
 {
