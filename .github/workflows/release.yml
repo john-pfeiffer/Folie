@@ -17,7 +17,7 @@ jobs:
         include:
           - name: macOS
             os: macos-14
-            extra_cmake: -DCMAKE_OSX_ARCHITECTURES=arm64;x86_64
+            extra_cmake: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
             pluginval_url: https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
           - name: Windows
             os: windows-2022
