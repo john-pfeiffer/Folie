@@ -250,6 +250,14 @@ void testLoopStabilityAndPerfAtExtremes()
     p.voice.fbTuneSemis = 12.0f;
     p.voice.sawCount = 16;
     p.voice.env1Sustain = 1.0f;
+    // Perf worst case: the whole rack lit up on every voice.
+    p.voice.fxEchoOn = true;
+    p.voice.fxEchoSync = 2;
+    p.voice.fxDiffOn = true;
+    p.voice.fxDiffSize = 1.0f;
+    p.voice.fxDiffAmt = 1.0f;
+    p.voice.fxRingOn = true;
+    p.voice.fxRingMode = 1;
     p.polyphony = 16;
     engine.setParams (p);
 
@@ -477,6 +485,80 @@ void testSaturatorFlavors()
     }
 }
 
+// Echo in x2 ratio mode must NOT shift the loop's fundamental (it's a
+// parallel feedforward tap, not a series delay) — the sung pitch stays put.
+void testEchoKeepsLoopPitch()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.sawCount = 1;
+    p.voice.detune = 0.0f;
+    p.voice.fbGain = 1.0f;
+    p.voice.env1Sustain = 1.0f;
+    p.voice.fxEchoOn = true;
+    p.voice.fxEchoSync = 1; // x2
+    p.voice.fxEchoAmt = 0.8f;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },
+    };
+    auto out = render (engine, events, 3.0);
+
+    const float peak = dominantFrequency (out, 1.0);
+    const float cents = centsBetween (peak, 110.0f);
+    std::printf ("      echo x2: dominant %.2f Hz (%.1f cents from A2)\n", peak, cents);
+    check (std::abs (cents) < 50.0f, "echo x2: loop fundamental unmoved by the echo tap");
+    check (allFinite (out, 20.0f), "echo x2: finite");
+}
+
+// Every module solo at its extremes, and everything on at once, on a hot loop.
+void testModulesSoloAndAllOn()
+{
+    struct Case { const char* name; void (*apply) (VoiceParams&); };
+    const Case cases[] = {
+        { "echo free extreme", [] (VoiceParams& v) { v.fxEchoOn = true; v.fxEchoSync = 0;
+              v.fxEchoTimeMs = 500.0f; v.fxEchoAmt = -1.0f; } },
+        { "diffuser extreme", [] (VoiceParams& v) { v.fxDiffOn = true; v.fxDiffSize = 1.0f;
+              v.fxDiffAmt = 1.0f; } },
+        { "ringmod hz extreme", [] (VoiceParams& v) { v.fxRingOn = true; v.fxRingMode = 0;
+              v.fxRingHz = 200.0f; v.fxRingMix = 1.0f; } },
+        { "ringmod track extreme", [] (VoiceParams& v) { v.fxRingOn = true; v.fxRingMode = 1;
+              v.fxRingRatio = 2.0f; v.fxRingMix = 1.0f; } },
+        { "all modules on", [] (VoiceParams& v) {
+              v.fxEchoOn = true; v.fxEchoSync = 3; v.fxEchoAmt = 1.0f;
+              v.fxDiffOn = true; v.fxDiffSize = 1.0f; v.fxDiffAmt = 1.0f;
+              v.fxRingOn = true; v.fxRingMode = 1; v.fxRingRatio = 1.5f; v.fxRingMix = 1.0f;
+              v.fxSatMode = 1; v.fbDriveDb = 24.0f; v.fbReso = 8.0f; } },
+    };
+
+    for (const auto& c : cases)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+
+        auto p = defaultParams();
+        p.voice.fbGain = 1.1f;
+        p.voice.env1Sustain = 1.0f;
+        p.polyphony = 8;
+        c.apply (p.voice);
+        engine.setParams (p);
+
+        std::vector<std::pair<int, juce::MidiMessage>> events;
+        for (int i = 0; i < 8; ++i)
+            events.emplace_back (i * 3000, juce::MidiMessage::noteOn (1, 38 + i * 4, 1.0f));
+
+        auto out = render (engine, events, 5.0);
+        std::printf ("      module case '%s': peak %.3f\n", c.name,
+                     out.getMagnitude (0, out.getNumSamples()));
+        check (allFinite (out, 20.0f), "module case: finite & bounded at 110% feedback");
+        check (out.getMagnitude (0, out.getNumSamples()) > 0.01f,
+               "module case: still producing signal");
+    }
+}
+
 // Order sanitizing: any junk becomes a valid permutation; round-trips hold.
 void testLoopOrderSanitizer()
 {
@@ -641,6 +723,8 @@ int main()
     testSaturatorFlavors();
     testLoopOrderSanitizer();
     testReorderMidRender();
+    testEchoKeepsLoopPitch();
+    testModulesSoloAndAllOn();
     testVoiceModes();
     testSafetyClip();
 

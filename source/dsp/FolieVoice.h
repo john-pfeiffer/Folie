@@ -22,10 +22,22 @@ struct VoiceParams
     float fbReso      = 1.5f;
     float fbDriveDb   = 6.0f;
 
-    // Loop FX rack (echo/diffuser/ringmod arrive in later stages)
+    // Loop FX rack
     bool fxFilterOn = true;
     bool fxSatOn    = true;
     int  fxSatMode  = 0;        // 0 tanh, 1 fold, 2 clip
+    bool  fxEchoOn   = false;
+    int   fxEchoSync = 0;       // 0 free; 1..5 = x2 x3 x4 x6 x8 of loop delay
+    float fxEchoTimeMs = 120.0f;
+    float fxEchoAmt  = 0.5f;    // -1..1
+    bool  fxDiffOn   = false;
+    float fxDiffSize = 0.5f;    // 0.1..1
+    float fxDiffAmt  = 0.5f;    // 0..1
+    bool  fxRingOn   = false;
+    int   fxRingMode = 0;       // 0 Hz, 1 track
+    float fxRingHz   = 8.0f;
+    float fxRingRatio = 0.5f;
+    float fxRingMix  = 0.5f;
     std::array<juce::uint8, numLoopModules> loopOrder { 0, 1, 2, 3, 4 };
 
     float env1AttackMs  = 5.0f;
@@ -92,11 +104,17 @@ public:
         juce::uint8 mask = 0;
         if (p.fxFilterOn) mask |= LoopFxChain::bit (LoopModuleID::filter);
         if (p.fxSatOn)    mask |= LoopFxChain::bit (LoopModuleID::saturator);
+        if (p.fxEchoOn)   mask |= LoopFxChain::bit (LoopModuleID::echo);
+        if (p.fxDiffOn)   mask |= LoopFxChain::bit (LoopModuleID::diffuser);
+        if (p.fxRingOn)   mask |= LoopFxChain::bit (LoopModuleID::ringmod);
         fx.setEnabled (mask);
         fx.setOrder (p.loopOrder);
         fx.filter.setShape (p.fbBandpass, p.fbReso);
         fx.filter.setCutoff (p.fbCutoff);
         fx.saturator.set ((Saturator::Mode) p.fxSatMode, p.fbDriveDb);
+        fx.diffuser.set (p.fxDiffSize, p.fxDiffAmt);
+        // Echo and ring mod are frequency-dependent (ratio/track modes) and
+        // update at chunk rate in renderNextBlock.
 
         fbBaseSmoothed.setTargetValue (p.fbGain);
         env1.setParameters ({ p.env1AttackMs * 0.001f,
@@ -197,6 +215,24 @@ public:
                                                   * std::log2 (VoiceParams::fbBaseHz)
                                             + params.fbTuneSemis / 12.0f);
             loop.setLoopFrequency (loopHz);
+
+            if (params.fxEchoOn)
+            {
+                static constexpr float ratios[] = { 0.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f };
+                const int sync = juce::jlimit (0, 5, params.fxEchoSync);
+                const float echoSamples = sync == 0
+                    ? params.fxEchoTimeMs * 0.001f * (float) sr
+                    : ratios[sync] * loop.getDelaySamples();
+                loop.fx().echo.set (echoSamples, params.fxEchoAmt);
+            }
+
+            if (params.fxRingOn)
+            {
+                const float shiftHz = params.fxRingMode == 0
+                    ? params.fxRingHz
+                    : juce::jlimit (0.05f, 4000.0f, params.fxRingRatio * freq);
+                loop.fx().ringmod.set (shiftHz, params.fxRingMix, sr);
+            }
 
             // ENV3 sweeps the damping cutoff. The envelope advances per
             // sample (below); the filter coefficient updates at chunk rate,

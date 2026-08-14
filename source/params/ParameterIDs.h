@@ -25,6 +25,18 @@ inline constexpr auto fbDrive      = "fbDrive";
 inline constexpr auto fxFilterOn = "fxFilterOn";
 inline constexpr auto fxSatOn    = "fxSatOn";
 inline constexpr auto fxSatMode  = "fxSatMode";
+inline constexpr auto fxEchoOn   = "fxEchoOn";
+inline constexpr auto fxEchoSync = "fxEchoSync";
+inline constexpr auto fxEchoTime = "fxEchoTime";
+inline constexpr auto fxEchoAmt  = "fxEchoAmt";
+inline constexpr auto fxDiffOn   = "fxDiffOn";
+inline constexpr auto fxDiffSize = "fxDiffSize";
+inline constexpr auto fxDiffAmt  = "fxDiffAmt";
+inline constexpr auto fxRingOn   = "fxRingOn";
+inline constexpr auto fxRingMode = "fxRingMode";
+inline constexpr auto fxRingHz   = "fxRingHz";
+inline constexpr auto fxRingRatio = "fxRingRatio";
+inline constexpr auto fxRingMix  = "fxRingMix";
 
 // ENV1 — amp
 inline constexpr auto env1Attack  = "env1Attack";

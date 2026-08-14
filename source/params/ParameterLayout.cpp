@@ -121,7 +121,45 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
             juce::ParameterID { ParamIDs::fxSatOn, 2 }, "Saturator On", true),
         std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID { ParamIDs::fxSatMode, 2 }, "Sat Mode",
-            juce::StringArray { "Tanh", "Fold", "Clip" }, 0));
+            juce::StringArray { "Tanh", "Fold", "Clip" }, 0),
+        std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { ParamIDs::fxEchoOn, 2 }, "Echo On", false),
+        // In ratio modes the echo tap tracks the loop delay (xK) — sub-octave
+        // partials that follow the note.
+        std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::fxEchoSync, 2 }, "Echo Sync",
+            juce::StringArray { "Free", "x2", "x3", "x4", "x6", "x8" }, 0),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxEchoTime, 2 }, "Echo Time",
+                               juce::NormalisableRange<float> { 1.0f, 500.0f, 0.0f, 0.45f },
+                               120.0f, msAttributes()),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxEchoAmt, 2 }, "Echo Amt",
+                               juce::NormalisableRange<float> { -100.0f, 100.0f, 0.0f }, 50.0f,
+                               percentAttributes()),
+        std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { ParamIDs::fxDiffOn, 2 }, "Diffuser On", false),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxDiffSize, 2 }, "Diff Size",
+                               juce::NormalisableRange<float> { 10.0f, 100.0f, 0.0f }, 50.0f,
+                               percentAttributes()),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxDiffAmt, 2 }, "Diffuse",
+                               percentRange(), 50.0f, percentAttributes()),
+        std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { ParamIDs::fxRingOn, 2 }, "Ring On", false),
+        std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::fxRingMode, 2 }, "Ring Mode",
+            juce::StringArray { "Hz", "Track" }, 0),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxRingHz, 2 }, "Ring Freq",
+                               juce::NormalisableRange<float> { 0.1f, 200.0f, 0.0f, 0.35f }, 8.0f,
+                               juce::AudioParameterFloatAttributes{}
+                                   .withLabel ("Hz")
+                                   .withStringFromValueFunction ([] (float v, int)
+                                   { return juce::String (v, 1) + " Hz"; })),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxRingRatio, 2 }, "Ring Ratio",
+                               juce::NormalisableRange<float> { 0.01f, 2.0f, 0.0f, 0.5f }, 0.5f,
+                               juce::AudioParameterFloatAttributes{}
+                                   .withStringFromValueFunction ([] (float v, int)
+                                   { return juce::String (v, 2); })),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::fxRingMix, 2 }, "Ring Mix",
+                               percentRange(), 50.0f, percentAttributes()));
 
     auto env1 = std::make_unique<Group> ("env1", "Amp Envelope", "|");
     env1->addChild (
