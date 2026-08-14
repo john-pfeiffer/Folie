@@ -1,19 +1,21 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
-#include <cmath>
+#include "LoopModules.h"
 
 // The signature of Folie: a Karplus-Strong-style feedback loop whose delay is
 // tuned to the played note, so cranked feedback resonates *in key*. Inside the
-// loop: damping filter (LP/BP TPT SVF) -> tanh saturator -> DC blocker.
+// loop sits the modular FX rack (LoopFxChain) — filter, saturator, echo,
+// diffuser, ring mod, in user order — followed by two hidden, always-on
+// safety stages:
 //
-// Per sample:  loopOut = dcBlock(tanh(drive * svf(delay[t - N])))
-//              y       = dry + fbGain * loopOut
-//              delay.push(y)
+//   - loop limiter: transparent below +/-1, soft knee to a +/-1.5 ceiling.
+//     With the saturator bypassable, this is what keeps feedback > 100% a
+//     bounded self-oscillation instead of an exponential blowup.
+//   - DC blocker: recirculated DC from asymmetric nonlinearities would walk
+//     the loop into the rails.
 //
-// tanh bounds the recirculating signal for ANY input, which is what lets the
-// feedback knob go past 1.0 (110%) without the loop blowing up — it settles
-// into a bounded self-oscillation instead, like a bowed string.
+// Per sample:  x = dcBlock(limit(chain(delay[t - N])))
+//              y = dry + fbGain * x;  delay.push(y)
 class TunedFeedbackLoop
 {
 public:
@@ -28,7 +30,7 @@ public:
         const juce::dsp::ProcessSpec spec { sampleRate, 512, 1 };
         delay.prepare (spec);
         delay.setMaximumDelayInSamples ((int) std::ceil (sampleRate / (double) minLoopHz) + 8);
-        svf.prepare (spec);
+        chain.prepare (sampleRate);
 
         dcCoeff = 1.0f - juce::MathConstants<float>::twoPi * 20.0f / (float) sampleRate;
         reset();
@@ -37,13 +39,13 @@ public:
     void reset()
     {
         delay.reset();
-        svf.reset();
+        chain.reset();
         dcX1 = dcY1 = 0.0f;
     }
 
     // hz is the desired loop resonance; clamped so the delay stays within the
-    // interpolator's happy range. True pitch sits slightly flat of hz (filter
-    // phase delay is uncompensated in v1) — the Loop Tune knob covers it.
+    // interpolator's happy range. True pitch sits slightly flat of hz (in-loop
+    // phase delay is uncompensated) — the Loop Tune knob covers it.
     void setLoopFrequency (float hz)
     {
         const float clamped = juce::jlimit (minLoopHz, maxLoopHz, hz);
@@ -52,43 +54,23 @@ public:
         delaySamples = juce::jmax (minDelaySamples, (float) sr / clamped - 1.0f);
     }
 
-    void setFilter (bool bandpass, float cutoffHz, float q)
-    {
-        svf.setType (bandpass ? juce::dsp::StateVariableTPTFilterType::bandpass
-                              : juce::dsp::StateVariableTPTFilterType::lowpass);
-        setCutoff (cutoffHz);
-        svf.setResonance (juce::jmax (0.1f, q));
-    }
+    float getDelaySamples() const { return delaySamples; }
+    double getSampleRate() const { return sr; }
 
-    // Cheap enough to call at chunk rate while ENV3 sweeps it.
-    void setCutoff (float cutoffHz)
-    {
-        svf.setCutoffFrequency (juce::jlimit (20.0f, (float) sr * 0.45f, cutoffHz));
-    }
-
-    void setDrive (float driveDb)
-    {
-        driveLin = juce::Decibels::decibelsToGain (driveDb);
-    }
+    LoopFxChain& fx() { return chain; }
 
     // Returns y = dry + fbGain * loopOut; y is also what recirculates.
     // fbGain is per-sample: the caller owns smoothing/enveloping (ENV2).
     forcedinline float processSample (float dry, float fbGain) noexcept
     {
         const float delayed = delay.popSample (0, delaySamples);
-        const float filtered = svf.processSample (0, delayed);
 
-        // Plain tanh: the output ceiling stays +/-1 regardless of drive, so the
-        // loop is always audible next to the saws, and small-signal loop gain is
-        // fb * drive — Drive pushes the loop INTO self-oscillation. (An earlier
-        // /drive normalization capped the loop at 1/drive and made cranking
-        // Drive turn the feedback DOWN.)
-        const float shaped = std::tanh (driveLin * filtered);
+        float x = chain.processSample (delayed);
+        x = loopLimit (x);
 
-        // In-loop DC blocker (~20 Hz one-pole HP). Mandatory: recirculated DC
-        // from asymmetric saturation would walk the loop into tanh's rails.
-        const float dcOut = shaped - dcX1 + dcCoeff * dcY1;
-        dcX1 = shaped;
+        // In-loop DC blocker (~20 Hz one-pole HP). Mandatory.
+        const float dcOut = x - dcX1 + dcCoeff * dcY1;
+        dcX1 = x;
         dcY1 = dcOut;
 
         const float y = dry + fbGain * dcOut;
@@ -97,12 +79,22 @@ public:
     }
 
 private:
+    // Hidden safety: bit-exact below +/-1, tanh knee up to a +/-1.5 ceiling.
+    static forcedinline float loopLimit (float x) noexcept
+    {
+        constexpr float knee = 1.0f;
+        const float ax = std::abs (x);
+        if (ax <= knee)
+            return x;
+        const float shaped = knee + 0.5f * std::tanh ((ax - knee) * 2.0f);
+        return x > 0.0f ? shaped : -shaped;
+    }
+
     double sr = 44100.0;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delay { 4800 };
-    juce::dsp::StateVariableTPTFilter<float> svf;
+    LoopFxChain chain;
 
     float delaySamples = 100.0f;
-    float driveLin = 1.0f;
     float dcCoeff = 0.997f;
     float dcX1 = 0.0f, dcY1 = 0.0f;
 };

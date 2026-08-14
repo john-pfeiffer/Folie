@@ -22,6 +22,11 @@ struct VoiceParams
     float fbReso      = 1.5f;
     float fbDriveDb   = 6.0f;
 
+    // Loop FX rack (echo/diffuser/ringmod arrive in later stages)
+    bool fxFilterOn = true;
+    bool fxSatOn    = true;
+    int  fxSatMode  = 0;        // 0 tanh, 1 fold, 2 clip
+
     float env1AttackMs  = 5.0f;
     float env1DecayMs   = 200.0f;
     float env1Sustain   = 0.8f; // 0..1
@@ -81,8 +86,16 @@ public:
     {
         params = p;
         osc.setParams (p.sawCount, p.detune, p.blend, p.width);
-        loop.setFilter (p.fbBandpass, p.fbCutoff, p.fbReso);
-        loop.setDrive (p.fbDriveDb);
+
+        auto& fx = loop.fx();
+        juce::uint8 mask = 0;
+        if (p.fxFilterOn) mask |= LoopFxChain::bit (LoopModuleID::filter);
+        if (p.fxSatOn)    mask |= LoopFxChain::bit (LoopModuleID::saturator);
+        fx.setEnabled (mask);
+        fx.filter.setShape (p.fbBandpass, p.fbReso);
+        fx.filter.setCutoff (p.fbCutoff);
+        fx.saturator.set ((Saturator::Mode) p.fxSatMode, p.fbDriveDb);
+
         fbBaseSmoothed.setTargetValue (p.fbGain);
         env1.setParameters ({ p.env1AttackMs * 0.001f,
                               p.env1DecayMs * 0.001f,
@@ -188,8 +201,8 @@ public:
             // which the TPT structure tolerates and keeps tan() off the
             // per-sample path.
             if (std::abs (params.env3Amount) > 1.0e-4f)
-                loop.setCutoff (params.fbCutoff
-                                * std::exp2 (5.0f * params.env3Amount * env3Level));
+                loop.fx().filter.setCutoff (params.fbCutoff
+                                            * std::exp2 (5.0f * params.env3Amount * env3Level));
 
             for (int i = 0; i < n; ++i)
             {

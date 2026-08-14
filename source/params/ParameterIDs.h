@@ -20,6 +20,12 @@ inline constexpr auto fbCutoff     = "fbCutoff";
 inline constexpr auto fbReso       = "fbReso";
 inline constexpr auto fbDrive      = "fbDrive";
 
+// Loop FX rack (in-loop modules; enables are the automatable dimension —
+// module ORDER is the loopOrder state property, not a parameter)
+inline constexpr auto fxFilterOn = "fxFilterOn";
+inline constexpr auto fxSatOn    = "fxSatOn";
+inline constexpr auto fxSatMode  = "fxSatMode";
+
 // ENV1 — amp
 inline constexpr auto env1Attack  = "env1Attack";
 inline constexpr auto env1Decay   = "env1Decay";

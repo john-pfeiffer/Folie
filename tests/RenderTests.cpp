@@ -202,8 +202,9 @@ void testLoopPitch()
     {
         TunedFeedbackLoop feedbackLoop;
         feedbackLoop.prepare (kSampleRate);
-        feedbackLoop.setFilter (false, 8000.0f, 0.71f);
-        feedbackLoop.setDrive (0.0f);
+        feedbackLoop.fx().filter.setShape (false, 0.71f);
+        feedbackLoop.fx().filter.setCutoff (8000.0f);
+        feedbackLoop.fx().saturator.set (Saturator::Mode::tanhMode, 0.0f);
         feedbackLoop.setLoopFrequency (target);
 
         const int totalSamples = (int) kSampleRate * 2;
@@ -393,6 +394,88 @@ void testFeedbackIsAudible()
     check (hotRms > dryRms * 1.25f, "fb audibility: hot loop adds >1.25x RMS over dry saws");
 }
 
+// Refactor guard: the default patch must sound the same through the modular
+// chain as it did through the hard-wired filter->tanh loop. Reference values
+// captured from the pre-refactor build (steady RMS 0.196027, peak 0.435825).
+void testGoldenDefaults()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+    engine.setParams (defaultParams());
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },
+    };
+    auto out = render (engine, events, 3.0);
+
+    const float rms = out.getRMSLevel (0, (int) kSampleRate, (int) kSampleRate * 2);
+    const float peak = out.getMagnitude (0, out.getNumSamples());
+    std::printf ("      golden: steady RMS %.6f (ref 0.196027), peak %.6f (ref 0.435825)\n",
+                 rms, peak);
+    check (std::abs (rms - 0.196027f) < 0.196027f * 0.1f,
+           "golden: default patch RMS within 10% of pre-refactor reference");
+    check (peak < 0.436f * 1.15f, "golden: default patch peak in family with reference");
+}
+
+// The new critical case: with EVERY module bypassed the loop is linear, so at
+// 110% feedback only the hidden limiter stands between us and infinity.
+void testAllModulesBypassedStability()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.fxFilterOn = false;
+    p.voice.fxSatOn = false;
+    p.voice.fbGain = 1.1f;
+    p.voice.env1Sustain = 1.0f;
+    p.polyphony = 8;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events;
+    for (int i = 0; i < 8; ++i)
+        events.emplace_back (i * 4000, juce::MidiMessage::noteOn (1, 40 + i * 5, 1.0f));
+    events.emplace_back ((int) (4.0 * kSampleRate), juce::MidiMessage ({ 0xb0, 123, 0 }, 0.0)); // all notes off
+
+    auto out = render (engine, events, 9.0);
+    check (allFinite (out, 20.0f),
+           "bypassed rack: hidden limiter bounds 110% feedback with no saturator");
+    check (rmsOfTail (out, 1.0) < juce::Decibels::decibelsToGain (-60.0f),
+           "bypassed rack: still gated silent after all-notes-off + release");
+}
+
+// Each saturator flavor must keep the loop bounded at maximum abuse.
+void testSaturatorFlavors()
+{
+    for (int mode = 0; mode < 3; ++mode)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+
+        auto p = defaultParams();
+        p.voice.fxSatMode = mode;
+        p.voice.fbGain = 1.1f;
+        p.voice.fbDriveDb = 24.0f;
+        p.voice.fbCutoff = 20000.0f;
+        p.voice.fbReso = 8.0f;
+        p.voice.env1Sustain = 1.0f;
+        p.polyphony = 8;
+        engine.setParams (p);
+
+        std::vector<std::pair<int, juce::MidiMessage>> events;
+        for (int i = 0; i < 8; ++i)
+            events.emplace_back (i * 3000, juce::MidiMessage::noteOn (1, 38 + i * 4, 1.0f));
+
+        auto out = render (engine, events, 5.0);
+        static const char* names[] = { "tanh", "fold", "clip" };
+        std::printf ("      sat flavor %s: peak %.3f\n", names[mode],
+                     out.getMagnitude (0, out.getNumSamples()));
+        check (allFinite (out, 20.0f), "sat flavor: extreme render stays finite & bounded");
+        check (out.getMagnitude (0, out.getNumSamples()) > 0.01f,
+               "sat flavor: still producing signal");
+    }
+}
+
 // Voice modes: Mono holds one voice with last-note priority; Legato changes
 // pitch without retriggering and the whole voice (including the tuned loop)
 // glides to the new note.
@@ -485,6 +568,9 @@ int main()
     testFeedbackEnvelopeAdditive();
     testCutoffEnvelopeStability();
     testFeedbackIsAudible();
+    testGoldenDefaults();
+    testAllModulesBypassedStability();
+    testSaturatorFlavors();
     testVoiceModes();
     testSafetyClip();
 

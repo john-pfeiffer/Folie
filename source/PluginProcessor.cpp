@@ -20,6 +20,9 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.fbCutoff     = apvts.getRawParameterValue (ParamIDs::fbCutoff);
     raw.fbReso       = apvts.getRawParameterValue (ParamIDs::fbReso);
     raw.fbDrive      = apvts.getRawParameterValue (ParamIDs::fbDrive);
+    raw.fxFilterOn   = apvts.getRawParameterValue (ParamIDs::fxFilterOn);
+    raw.fxSatOn      = apvts.getRawParameterValue (ParamIDs::fxSatOn);
+    raw.fxSatMode    = apvts.getRawParameterValue (ParamIDs::fxSatMode);
     raw.env1A     = apvts.getRawParameterValue (ParamIDs::env1Attack);
     raw.env1D     = apvts.getRawParameterValue (ParamIDs::env1Decay);
     raw.env1S     = apvts.getRawParameterValue (ParamIDs::env1Sustain);
@@ -55,6 +58,9 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.fbCutoff      = raw.fbCutoff->load();
     p.voice.fbReso        = raw.fbReso->load();
     p.voice.fbDriveDb     = raw.fbDrive->load();
+    p.voice.fxFilterOn    = raw.fxFilterOn->load() > 0.5f;
+    p.voice.fxSatOn       = raw.fxSatOn->load() > 0.5f;
+    p.voice.fxSatMode     = (int) raw.fxSatMode->load();
     p.voice.env1AttackMs  = raw.env1A->load();
     p.voice.env1DecayMs   = raw.env1D->load();
     p.voice.env1Sustain   = raw.env1S->load() * 0.01f;

@@ -59,6 +59,9 @@ private:
         std::atomic<float>* fbCutoff = nullptr;
         std::atomic<float>* fbReso = nullptr;
         std::atomic<float>* fbDrive = nullptr;
+        std::atomic<float>* fxFilterOn = nullptr;
+        std::atomic<float>* fxSatOn = nullptr;
+        std::atomic<float>* fxSatMode = nullptr;
         std::atomic<float>* env1A = nullptr;
         std::atomic<float>* env1D = nullptr;
         std::atomic<float>* env1S = nullptr;
