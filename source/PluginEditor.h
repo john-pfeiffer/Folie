@@ -3,7 +3,6 @@
 #include "PluginProcessor.h"
 #include "ui/Knob.h"
 #include "ui/SectionPanel.h"
-#include "ui/Toggle.h"
 
 class FolieAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -31,20 +30,8 @@ private:
     SectionPanel env3Section { "CUTOFF ENV" };
     Knob cutAttack, cutDecay, cutSustain, cutRelease, cutAmount;
 
-    SectionPanel chorusSection { "CHORUS" };
-    Toggle chorusOn;
-    Knob chorusRate, chorusDepth, chorusMix;
-
-    SectionPanel delaySection { "DELAY" };
-    Toggle delayOn;
-    Knob delayTime, delayFeedback, delayMix;
-
-    SectionPanel reverbSection { "REVERB" };
-    Toggle reverbOn;
-    Knob reverbSize, reverbDamp, reverbMix;
-
     SectionPanel globalSection { "GLOBAL" };
-    Knob ceiling, polyphony, glide, master;
+    Knob voiceMode, polyphony, glide, master;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FolieAudioProcessorEditor)
 };

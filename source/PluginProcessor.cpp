@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "dsp/SoftClip.h"
 #include "params/ParameterIDs.h"
 #include "params/ParameterLayout.h"
 
@@ -19,19 +20,6 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.fbCutoff     = apvts.getRawParameterValue (ParamIDs::fbCutoff);
     raw.fbReso       = apvts.getRawParameterValue (ParamIDs::fbReso);
     raw.fbDrive      = apvts.getRawParameterValue (ParamIDs::fbDrive);
-    raw.limiterCeiling = apvts.getRawParameterValue (ParamIDs::limiterCeiling);
-    raw.chorusOn      = apvts.getRawParameterValue (ParamIDs::chorusOn);
-    raw.chorusRate    = apvts.getRawParameterValue (ParamIDs::chorusRate);
-    raw.chorusDepth   = apvts.getRawParameterValue (ParamIDs::chorusDepth);
-    raw.chorusMix     = apvts.getRawParameterValue (ParamIDs::chorusMix);
-    raw.delayOn       = apvts.getRawParameterValue (ParamIDs::delayOn);
-    raw.delayTime     = apvts.getRawParameterValue (ParamIDs::delayTime);
-    raw.delayFeedback = apvts.getRawParameterValue (ParamIDs::delayFeedback);
-    raw.delayMix      = apvts.getRawParameterValue (ParamIDs::delayMix);
-    raw.reverbOn      = apvts.getRawParameterValue (ParamIDs::reverbOn);
-    raw.reverbSize    = apvts.getRawParameterValue (ParamIDs::reverbSize);
-    raw.reverbDamp    = apvts.getRawParameterValue (ParamIDs::reverbDamp);
-    raw.reverbMix     = apvts.getRawParameterValue (ParamIDs::reverbMix);
     raw.env1A     = apvts.getRawParameterValue (ParamIDs::env1Attack);
     raw.env1D     = apvts.getRawParameterValue (ParamIDs::env1Decay);
     raw.env1S     = apvts.getRawParameterValue (ParamIDs::env1Sustain);
@@ -46,6 +34,7 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.env3S     = apvts.getRawParameterValue (ParamIDs::env3Sustain);
     raw.env3R     = apvts.getRawParameterValue (ParamIDs::env3Release);
     raw.env3Amt   = apvts.getRawParameterValue (ParamIDs::env3Amount);
+    raw.voiceMode = apvts.getRawParameterValue (ParamIDs::voiceMode);
     raw.polyphony = apvts.getRawParameterValue (ParamIDs::polyphony);
     raw.glide     = apvts.getRawParameterValue (ParamIDs::glideTime);
     raw.master    = apvts.getRawParameterValue (ParamIDs::masterVolume);
@@ -80,39 +69,20 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.env3Sustain   = raw.env3S->load() * 0.01f;
     p.voice.env3ReleaseMs = raw.env3R->load();
     p.voice.env3Amount    = raw.env3Amt->load() * 0.01f;
+    const int mode        = (int) raw.voiceMode->load();
+    p.mode                = mode == 1 ? VoiceMode::mono
+                          : mode == 2 ? VoiceMode::legato
+                                      : VoiceMode::poly;
     p.polyphony           = (int) raw.polyphony->load();
     p.glideSeconds        = raw.glide->load() * 0.001f;
     return p;
 }
 
-FxParams FolieAudioProcessor::gatherFxParams() const
-{
-    FxParams p;
-    p.chorusOn      = raw.chorusOn->load() > 0.5f;
-    p.chorusRateHz  = raw.chorusRate->load();
-    p.chorusDepth   = raw.chorusDepth->load() * 0.01f;
-    p.chorusMix     = raw.chorusMix->load() * 0.01f;
-    p.delayOn       = raw.delayOn->load() > 0.5f;
-    p.delayTimeMs   = raw.delayTime->load();
-    p.delayFeedback = raw.delayFeedback->load() * 0.01f;
-    p.delayMix      = raw.delayMix->load() * 0.01f;
-    p.reverbOn      = raw.reverbOn->load() > 0.5f;
-    p.reverbSize    = raw.reverbSize->load() * 0.01f;
-    p.reverbDamp    = raw.reverbDamp->load() * 0.01f;
-    p.reverbMix     = raw.reverbMix->load() * 0.01f;
-    return p;
-}
-
-void FolieAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void FolieAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     engine.prepare (sampleRate);
     engine.setParams (gatherParams());
-    fx.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 2 });
-    fx.setParams (gatherFxParams());
     masterGain.reset (sampleRate, 0.02);
-
-    limiter.prepare ({ sampleRate, (juce::uint32) samplesPerBlock, 2 });
-    limiter.setRelease (100.0f);
 }
 
 bool FolieAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -129,18 +99,18 @@ void FolieAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     engine.setParams (gatherParams());
     engine.renderBlock (buffer, midi);
 
-    fx.setParams (gatherFxParams());
-    fx.process (buffer);
-
     const float masterDb = raw.master->load();
     masterGain.setTargetValue (masterDb <= -59.9f ? 0.0f
                                                   : juce::Decibels::decibelsToGain (masterDb));
     masterGain.applyGain (buffer, buffer.getNumSamples());
 
-    limiter.setThreshold (raw.limiterCeiling->load());
-    juce::dsp::AudioBlock<float> block (buffer);
-    juce::dsp::ProcessContextReplacing<float> context (block);
-    limiter.process (context);
+    // Fixed safety soft-clip — the only bus stage (zero post FX by design).
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        auto* data = buffer.getWritePointer (ch);
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+            data[i] = SafetyClip::process (data[i]);
+    }
 }
 
 void FolieAudioProcessor::getStateInformation (juce::MemoryBlock& destData)

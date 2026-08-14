@@ -27,7 +27,7 @@ struct VoiceParams
     float env1Sustain   = 0.8f; // 0..1
     float env1ReleaseMs = 300.0f;
 
-    // ENV2 -> feedback gain: fbEff = fbGain * ((1 - amt) + amt * env2)
+    // ENV2 -> feedback gain, additive per spec: fbEff = fbGain + amt * env2
     float env2AttackMs  = 5.0f;
     float env2DecayMs   = 400.0f;
     float env2Sustain   = 1.0f;
@@ -114,6 +114,18 @@ public:
         env3.noteOn();
     }
 
+    // Legato pitch change: retune (and glide) without retriggering envelopes
+    // or resetting phases/loop state. The tuned delay follows the glided
+    // frequency automatically — this is the mono-synth scream-bend.
+    void changeNote (int midiNote, float glideSeconds)
+    {
+        note = midiNote;
+        const float current = smoothedFreq.getCurrentValue();
+        smoothedFreq.reset (sr, glideSeconds);
+        smoothedFreq.setCurrentAndTargetValue (current);
+        smoothedFreq.setTargetValue (noteHz (midiNote));
+    }
+
     void stopNote (bool allowTailOff)
     {
         if (allowTailOff)
@@ -184,12 +196,12 @@ public:
                 float l, r;
                 osc.processSample (l, r);
 
-                // ENV2 blends the feedback gain between its static knob value
-                // and the fully-enveloped value.
+                // ENV2 adds on top of the knob (spec: base + amount * ADSR),
+                // clamped to the knob's own 110% ceiling.
                 const float fbBase = fbBaseSmoothed.getNextValue();
                 const float env2Sample = env2.getNextSample();
-                const float fbEff = fbBase * ((1.0f - params.env2Amount)
-                                              + params.env2Amount * env2Sample);
+                const float fbEff = juce::jlimit (
+                    0.0f, 1.1f, fbBase + params.env2Amount * env2Sample);
                 env3Level = env3.getNextSample();
 
                 // The loop runs on the mono sum; its return is added equally

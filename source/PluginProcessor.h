@@ -2,7 +2,6 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
-#include "dsp/FxChain.h"
 #include "dsp/SynthEngine.h"
 
 class FolieAudioProcessor : public juce::AudioProcessor
@@ -42,12 +41,9 @@ public:
 
 private:
     EngineParams gatherParams() const;
-    FxParams gatherFxParams() const;
 
     SynthEngine engine;
-    FxChain fx;
     juce::SmoothedValue<float> masterGain { 0.5f };
-    juce::dsp::Limiter<float> limiter; // always in-circuit — feedback safety net
 
     struct RawParams
     {
@@ -63,7 +59,6 @@ private:
         std::atomic<float>* fbCutoff = nullptr;
         std::atomic<float>* fbReso = nullptr;
         std::atomic<float>* fbDrive = nullptr;
-        std::atomic<float>* limiterCeiling = nullptr;
         std::atomic<float>* env1A = nullptr;
         std::atomic<float>* env1D = nullptr;
         std::atomic<float>* env1S = nullptr;
@@ -78,18 +73,7 @@ private:
         std::atomic<float>* env3S = nullptr;
         std::atomic<float>* env3R = nullptr;
         std::atomic<float>* env3Amt = nullptr;
-        std::atomic<float>* chorusOn = nullptr;
-        std::atomic<float>* chorusRate = nullptr;
-        std::atomic<float>* chorusDepth = nullptr;
-        std::atomic<float>* chorusMix = nullptr;
-        std::atomic<float>* delayOn = nullptr;
-        std::atomic<float>* delayTime = nullptr;
-        std::atomic<float>* delayFeedback = nullptr;
-        std::atomic<float>* delayMix = nullptr;
-        std::atomic<float>* reverbOn = nullptr;
-        std::atomic<float>* reverbSize = nullptr;
-        std::atomic<float>* reverbDamp = nullptr;
-        std::atomic<float>* reverbMix = nullptr;
+        std::atomic<float>* voiceMode = nullptr;
         std::atomic<float>* polyphony = nullptr;
         std::atomic<float>* glide = nullptr;
         std::atomic<float>* master = nullptr;

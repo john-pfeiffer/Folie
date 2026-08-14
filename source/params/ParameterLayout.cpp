@@ -151,48 +151,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                juce::NormalisableRange<float> { -100.0f, 100.0f, 0.0f }, 0.0f,
                                percentAttributes()));
 
-    auto fx = std::make_unique<Group> ("fx", "FX", "|");
-    fx->addChild (
-        // Chorus defaults ON — the supersaw's finishing layer is the first
-        // impression; one click to disable.
-        std::make_unique<juce::AudioParameterBool> (
-            juce::ParameterID { ParamIDs::chorusOn, 1 }, "Chorus", true),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::chorusRate, 1 }, "Rate",
-                               juce::NormalisableRange<float> { 0.05f, 8.0f, 0.0f, 0.5f }, 0.8f,
-                               juce::AudioParameterFloatAttributes{}
-                                   .withLabel ("Hz")
-                                   .withStringFromValueFunction ([] (float v, int)
-                                   { return juce::String (v, 2) + " Hz"; })),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::chorusDepth, 1 }, "Depth",
-                               percentRange(), 30.0f, percentAttributes()),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::chorusMix, 1 }, "Ch Mix",
-                               percentRange(), 50.0f, percentAttributes()),
-        std::make_unique<juce::AudioParameterBool> (
-            juce::ParameterID { ParamIDs::delayOn, 1 }, "Delay", false),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::delayTime, 1 }, "Time",
-                               juce::NormalisableRange<float> { 20.0f, 2000.0f, 0.0f, 0.4f },
-                               350.0f, msAttributes()),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::delayFeedback, 1 }, "Dly FB",
-                               juce::NormalisableRange<float> { 0.0f, 95.0f, 0.0f }, 35.0f,
-                               percentAttributes()),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::delayMix, 1 }, "Dly Mix",
-                               percentRange(), 25.0f, percentAttributes()),
-        std::make_unique<juce::AudioParameterBool> (
-            juce::ParameterID { ParamIDs::reverbOn, 1 }, "Reverb", false),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::reverbSize, 1 }, "Size",
-                               percentRange(), 50.0f, percentAttributes()),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::reverbDamp, 1 }, "Damp",
-                               percentRange(), 50.0f, percentAttributes()),
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::reverbMix, 1 }, "Rev Mix",
-                               percentRange(), 20.0f, percentAttributes()));
-
     auto global = std::make_unique<Group> ("global", "Global", "|");
     global->addChild (
-        // The limiter itself is always in-circuit (feedback synth safety net);
-        // only its ceiling is a parameter.
-        std::make_unique<APF> (juce::ParameterID { ParamIDs::limiterCeiling, 1 }, "Ceiling",
-                               juce::NormalisableRange<float> { -12.0f, 0.0f, 0.0f }, -0.3f,
-                               dbAttributes()),
+        // Excluded from Randomize when FOL-8 lands (mode flips are jarring).
+        std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { ParamIDs::voiceMode, 1 }, "Voice Mode",
+            juce::StringArray { "Poly", "Mono", "Legato" }, 0),
         std::make_unique<API> (juce::ParameterID { ParamIDs::polyphony, 1 }, "Voices", 1, 16, 8),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::glideTime, 1 }, "Glide",
                                juce::NormalisableRange<float> { 0.0f, 2000.0f, 0.0f, 0.3f }, 0.0f,
@@ -208,5 +172,5 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
                                    })));
 
     return { std::move (osc), std::move (loop), std::move (env1),
-             std::move (env2), std::move (env3), std::move (fx), std::move (global) };
+             std::move (env2), std::move (env3), std::move (global) };
 }

@@ -4,10 +4,11 @@
 
 #include <juce_dsp/juce_dsp.h>
 
-#include "dsp/FxChain.h"
+#include "dsp/SoftClip.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/TunedFeedbackLoop.h"
 
+#include <chrono>
 #include <cstdio>
 
 namespace
@@ -176,6 +177,7 @@ void testOscillatorPitch()
     auto p = defaultParams();
     p.voice.sawCount = 1;   // single saw, no detune: fundamental should dominate
     p.voice.detune = 0.0f;
+    p.voice.fbGain = 0.0f;  // loop off for a clean oscillator measurement
     p.voice.env1AttackMs = 1.0f;
     p.voice.env1Sustain = 1.0f;
     engine.setParams (p);
@@ -190,6 +192,7 @@ void testOscillatorPitch()
     std::printf ("      osc pitch: dominant %.2f Hz (%.1f cents from A2)\n", peak, cents);
     check (std::abs (cents) < 20.0f, "osc pitch: single saw fundamental within 20 cents of A2");
 }
+
 // The core promise of the instrument: excite the loop with a burst, let it
 // ring at high feedback, and the ringing pitch must be the note you asked for
 // (Karplus-Strong behavior). Tests the tuning math + fractional delay directly.
@@ -230,8 +233,9 @@ void testLoopPitch()
 
 // Worst case everything: 110% feedback, +24 dB drive, wide-open filter, high
 // resonance, 16 voices. Must stay finite and bounded (tanh + DC blocker are
-// the guarantees under test).
-void testLoopStabilityAtExtremes()
+// the guarantees under test). Doubles as the spec's CPU sanity check: the
+// render must run comfortably faster than realtime.
+void testLoopStabilityAndPerfAtExtremes()
 {
     SynthEngine engine;
     engine.prepare (kSampleRate);
@@ -251,9 +255,18 @@ void testLoopStabilityAtExtremes()
     for (int i = 0; i < 16; ++i)
         events.emplace_back (i * 400, juce::MidiMessage::noteOn (1, 36 + i * 3, 1.0f));
 
+    const auto t0 = std::chrono::steady_clock::now();
     auto out = render (engine, events, 10.0);
+    const auto t1 = std::chrono::steady_clock::now();
+    const double renderSeconds = std::chrono::duration<double> (t1 - t0).count();
+    const double realtimeFactor = renderSeconds / 10.0;
+
     check (allFinite (out, 20.0f), "loop stability: 16 voices at 110% fb / +24 dB drive stay finite & bounded");
     check (out.getMagnitude (0, out.getNumSamples()) > 0.01f, "loop stability: still producing signal");
+
+    std::printf ("      perf: 10 s @ 16 voices x 16 saws rendered in %.2f s (%.2fx realtime budget)\n",
+                 renderSeconds, realtimeFactor);
+    check (realtimeFactor < 1.0, "perf: max-polyphony extreme patch renders faster than realtime");
 }
 
 // After note-off + release the voice must go silent even with the loop pushed
@@ -278,20 +291,22 @@ void testFeedbackTailGated()
            "feedback tail: gated silent by amp env after release");
     check (engine.countActiveVoices() == 0, "feedback tail: voice freed");
 }
-// ENV2 must actually shape the feedback: with amount=100% and sustain=0, the
-// loop's contribution dies after the decay even though the note is held —
-// versus amount=0 where fb>1 keeps the loop screaming. Compare late-window
-// energy of the two renders.
-void testFeedbackEnvelopeModulates()
+
+// ENV2 is additive per spec (fbEff = base + amount * env2). With base 0 and
+// amount 100%, the envelope alone must drive the loop (impossible under the
+// old multiplicative blend); with sustain 0 the scream must die back to plain
+// saws late in a held note.
+void testFeedbackEnvelopeAdditive()
 {
-    auto renderWithAmount = [] (float amount)
+    auto renderCase = [] (float base, float amount)
     {
         SynthEngine engine;
         engine.prepare (kSampleRate);
 
         auto p = defaultParams();
         p.voice.sawCount = 1;
-        p.voice.fbGain = 1.05f;
+        p.voice.fbGain = base;
+        p.voice.fbDriveDb = 6.0f;
         p.voice.env1Sustain = 1.0f;
         p.voice.env2Amount = amount;
         p.voice.env2DecayMs = 200.0f;
@@ -304,18 +319,20 @@ void testFeedbackEnvelopeModulates()
         return render (engine, events, 4.0);
     };
 
-    const auto held = renderWithAmount (0.0f);
-    const auto enveloped = renderWithAmount (1.0f);
+    const auto held = renderCase (1.0f, 0.0f);      // static screaming feedback
+    const auto enveloped = renderCase (0.0f, 1.0f); // env-only feedback, decays to 0
 
     const float heldLate = rmsOfTail (held, 1.0);
     const float envelopedLate = rmsOfTail (enveloped, 1.0);
-    std::printf ("      env2: late RMS static fb %.4f vs enveloped fb %.4f\n",
+    std::printf ("      env2: late RMS static fb %.4f vs env-only fb %.4f\n",
                  heldLate, envelopedLate);
     check (envelopedLate < heldLate * 0.7f,
-           "env2: enveloped feedback is quieter late in the note than static feedback");
+           "env2 additive: env-only feedback decays back to saws while static fb screams on");
 
-    // And the enveloped render must stay finite while modulating per-sample.
-    check (allFinite (enveloped, 20.0f), "env2: enveloped render finite");
+    const float envelopedEarly = enveloped.getRMSLevel (0, 0, (int) (0.2 * kSampleRate));
+    check (envelopedEarly > envelopedLate * 1.3f,
+           "env2 additive: base-0 patch is driven by the envelope early in the note");
+    check (allFinite (enveloped, 20.0f), "env2 additive: enveloped render finite");
 }
 
 // ENV3 sweep at extreme settings must stay stable (per-sample env, chunk-rate
@@ -343,78 +360,10 @@ void testCutoffEnvelopeStability()
     auto out = render (engine, events, 6.0);
     check (allFinite (out, 20.0f), "env3: extreme swept-cutoff render stays finite");
 }
-// Renders a short poly phrase and returns it (shared input for FX tests).
-juce::AudioBuffer<float> renderDryPhrase (double seconds)
-{
-    SynthEngine engine;
-    engine.prepare (kSampleRate);
-    engine.setParams (defaultParams());
 
-    std::vector<std::pair<int, juce::MidiMessage>> events {
-        { 0, juce::MidiMessage::noteOn (1, 48, 0.8f) },
-        { 2000, juce::MidiMessage::noteOn (1, 55, 0.8f) },
-        { 40000, juce::MidiMessage::noteOff (1, 48) },
-        { 40000, juce::MidiMessage::noteOff (1, 55) },
-    };
-    return render (engine, events, seconds);
-}
-
-void processThroughFx (juce::AudioBuffer<float>& buffer, const FxParams& p)
-{
-    FxChain fxChain;
-    fxChain.prepare ({ kSampleRate, (juce::uint32) kBlockSize, 2 });
-    fxChain.setParams (p);
-
-    juce::AudioBuffer<float> block (2, kBlockSize);
-    for (int start = 0; start < buffer.getNumSamples(); start += kBlockSize)
-    {
-        const int n = juce::jmin (kBlockSize, buffer.getNumSamples() - start);
-        block.setSize (2, n, false, false, true);
-        for (int ch = 0; ch < 2; ++ch)
-            block.copyFrom (ch, 0, buffer, ch, start, n);
-        fxChain.setParams (p);
-        fxChain.process (block);
-        for (int ch = 0; ch < 2; ++ch)
-            buffer.copyFrom (ch, start, block, ch, 0, n);
-    }
-}
-
-// All FX off must be a clean passthrough (bit-for-bit is too strict across the
-// chorus's internal mixer, but RMS must match within ~1 dB and stay finite).
-void testFxBypassPassthrough()
-{
-    auto dry = renderDryPhrase (2.0);
-    auto processed = renderDryPhrase (2.0);
-
-    FxParams p; // all off by default
-    processThroughFx (processed, p);
-
-    check (allFinite (processed, 4.0f), "fx bypass: finite");
-    const float dryRms = dry.getRMSLevel (0, 0, dry.getNumSamples());
-    const float wetRms = processed.getRMSLevel (0, 0, processed.getNumSamples());
-    const float ratioDb = std::abs (juce::Decibels::gainToDecibels (wetRms / juce::jmax (1.0e-9f, dryRms)));
-    std::printf ("      fx bypass: RMS delta %.3f dB\n", ratioDb);
-    check (ratioDb < 1.0f, "fx bypass: all-off chain passes signal within 1 dB");
-}
-
-// Everything on at extreme settings must stay finite and bounded.
-void testFxExtremes()
-{
-    auto buffer = renderDryPhrase (6.0);
-
-    FxParams p;
-    p.chorusOn = true;  p.chorusRateHz = 8.0f; p.chorusDepth = 1.0f; p.chorusMix = 1.0f;
-    p.delayOn = true;   p.delayTimeMs = 2000.0f; p.delayFeedback = 0.95f; p.delayMix = 1.0f;
-    p.reverbOn = true;  p.reverbSize = 1.0f; p.reverbDamp = 0.0f; p.reverbMix = 1.0f;
-    processThroughFx (buffer, p);
-
-    check (allFinite (buffer, 20.0f), "fx extremes: all-on maxed chain stays finite & bounded");
-}
-
-// Regression guard for the field report "no feedback loop at all": the same
-// held-note phrase with hot feedback must carry substantially more energy than
-// with the loop off. (An earlier tanh normalization capped the loop at
-// 1/drive and made it inaudible.)
+// Regression guard for the "no feedback loop at all" field report: the same
+// held-note phrase with hot feedback must carry substantially more energy
+// than with the loop off.
 void testFeedbackIsAudible()
 {
     auto renderWithFeedback = [] (float fbGain, float driveDb)
@@ -444,25 +393,84 @@ void testFeedbackIsAudible()
     check (hotRms > dryRms * 1.25f, "fb audibility: hot loop adds >1.25x RMS over dry saws");
 }
 
-// The delay must actually delay: with a 500 ms delay and the dry phrase ending
-// before the render does, the late window must carry echo energy that the dry
-// render doesn't have.
-void testDelayProducesTail()
+// Voice modes: Mono holds one voice with last-note priority; Legato changes
+// pitch without retriggering and the whole voice (including the tuned loop)
+// glides to the new note.
+void testVoiceModes()
 {
-    auto dry = renderDryPhrase (4.0);
-    auto wet = renderDryPhrase (4.0);
+    // Mono: a held chord collapses to one voice; releasing the last note
+    // falls back to the previous held note.
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+        auto p = defaultParams();
+        p.mode = VoiceMode::mono;
+        p.voice.sawCount = 1;
+        p.voice.detune = 0.0f;
+        p.voice.fbGain = 0.0f;
+        p.voice.env1Sustain = 1.0f;
+        engine.setParams (p);
 
-    FxParams p;
-    p.delayOn = true;
-    p.delayTimeMs = 500.0f;
-    p.delayFeedback = 0.6f;
-    p.delayMix = 1.0f;
-    processThroughFx (wet, p);
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },     // A2
+            { 4000, juce::MidiMessage::noteOn (1, 52, 0.9f) },  // E3 (takes over)
+            { (int) kSampleRate, juce::MidiMessage::noteOff (1, 52) }, // back to A2
+        };
 
-    const float dryLate = rmsOfTail (dry, 1.0);
-    const float wetLate = rmsOfTail (wet, 1.0);
-    std::printf ("      delay tail: late RMS dry %.5f vs delayed %.5f\n", dryLate, wetLate);
-    check (wetLate > dryLate * 2.0f + 1.0e-5f, "delay: echoes persist after the dry phrase ends");
+        auto out = render (engine, events, 3.0);
+        check (engine.countActiveVoices() == 1, "mono: overlapping notes use a single voice");
+
+        const float late = dominantFrequency (out, 1.0);
+        std::printf ("      mono fallback: late dominant %.2f Hz (expect A2 110)\n", late);
+        check (std::abs (centsBetween (late, 110.0f)) < 30.0f,
+               "mono: releasing top note falls back to the held note");
+        check (allFinite (out, 4.0f), "mono: finite");
+    }
+
+    // Legato: second overlapping note takes the pitch without retrigger;
+    // the sounding pitch ends on the new note.
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+        auto p = defaultParams();
+        p.mode = VoiceMode::legato;
+        p.voice.sawCount = 1;
+        p.voice.detune = 0.0f;
+        p.voice.fbGain = 0.0f;
+        p.voice.env1AttackMs = 1.0f;
+        p.voice.env1Sustain = 1.0f;
+        p.glideSeconds = 0.1f;
+        engine.setParams (p);
+
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },    // A2
+            { 24000, juce::MidiMessage::noteOn (1, 57, 0.9f) } // A3, legato glide up
+        };
+
+        auto out = render (engine, events, 3.0);
+        check (engine.countActiveVoices() == 1, "legato: overlapping notes use a single voice");
+
+        const float late = dominantFrequency (out, 1.0);
+        std::printf ("      legato glide: late dominant %.2f Hz (expect A3 220)\n", late);
+        check (std::abs (centsBetween (late, 220.0f)) < 30.0f,
+               "legato: pitch glides to the new note without retrigger");
+        check (allFinite (out, 4.0f), "legato: finite");
+    }
+}
+
+// The fixed output soft-clip: bit-exact below the -1 dBFS knee, bounded below
+// 0 dBFS for any input.
+void testSafetyClip()
+{
+    bool transparent = true;
+    for (float x = -0.85f; x <= 0.85f; x += 0.05f)
+        transparent = transparent && juce::exactlyEqual (SafetyClip::process (x), x);
+    check (transparent, "safety clip: bit-exact below the knee");
+
+    bool bounded = true;
+    for (float x : { 1.5f, 4.0f, 100.0f, -100.0f, 1.0e9f })
+        bounded = bounded && std::abs (SafetyClip::process (x)) <= 1.0f;
+    check (bounded, "safety clip: ceiling at 0 dBFS for any input");
 }
 } // namespace
 
@@ -472,14 +480,13 @@ int main()
     testTailDecay();
     testOscillatorPitch();
     testLoopPitch();
-    testLoopStabilityAtExtremes();
+    testLoopStabilityAndPerfAtExtremes();
     testFeedbackTailGated();
-    testFeedbackEnvelopeModulates();
+    testFeedbackEnvelopeAdditive();
     testCutoffEnvelopeStability();
-    testFxBypassPassthrough();
-    testFxExtremes();
-    testDelayProducesTail();
     testFeedbackIsAudible();
+    testVoiceModes();
+    testSafetyClip();
 
     std::printf (failures == 0 ? "All tests passed.\n" : "%d test(s) FAILED.\n", failures);
     return failures == 0 ? 0 : 1;

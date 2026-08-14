@@ -2,9 +2,12 @@
 
 #include "FolieVoice.h"
 
+enum class VoiceMode { poly, mono, legato };
+
 struct EngineParams
 {
     VoiceParams voice;
+    VoiceMode mode     = VoiceMode::poly;
     int   polyphony    = 8;      // 1..16
     float glideSeconds = 0.0f;
 };
@@ -26,6 +29,15 @@ public:
 
     void setParams (const EngineParams& p)
     {
+        // Leaving poly mode: release the extra voices and start the
+        // mono/legato note stack fresh.
+        if (p.mode != engineParams.mode && p.mode != VoiceMode::poly)
+        {
+            for (int i = 1; i < maxVoices; ++i)
+                voices[i].stopNote (true);
+            numHeld = 0;
+        }
+
         engineParams = p;
         for (auto& v : voices)
             v.setParams (p.voice);
@@ -89,6 +101,12 @@ private:
 
     void noteOn (int note, float velocity)
     {
+        if (engineParams.mode != VoiceMode::poly)
+        {
+            monoNoteOn (note, velocity);
+            return;
+        }
+
         auto* voice = findVoiceFor (note);
 
         const float glideFrom = engineParams.glideSeconds > 0.0f ? lastNoteHz : 0.0f;
@@ -99,6 +117,12 @@ private:
 
     void noteOff (int note)
     {
+        if (engineParams.mode != VoiceMode::poly)
+        {
+            monoNoteOff (note);
+            return;
+        }
+
         for (auto& v : voices)
         {
             if (v.isActive() && v.currentNote() == note && v.isHeld())
@@ -106,6 +130,57 @@ private:
                 v.setHeld (false);
                 v.stopNote (true);
             }
+        }
+    }
+
+    // Mono/Legato: one voice, last-note priority via a held-note stack.
+    // Mono retriggers envelopes on every transition; Legato changes pitch
+    // without retriggering while any note is still held (and the tuned delay
+    // glides with the pitch — the scream-bend).
+    void monoNoteOn (int note, float velocity)
+    {
+        pushHeld (note, velocity);
+
+        auto& v = voices[0];
+        const bool sounding = v.isActive() && v.isHeld();
+        v.setHeld (true);
+
+        if (engineParams.mode == VoiceMode::legato && sounding)
+        {
+            v.changeNote (note, engineParams.glideSeconds);
+        }
+        else
+        {
+            const float glideFrom = engineParams.glideSeconds > 0.0f ? lastNoteHz : 0.0f;
+            v.startNote (note, velocity, glideFrom, engineParams.glideSeconds);
+        }
+        lastNoteHz = FolieVoice::noteHz (note);
+    }
+
+    void monoNoteOff (int note)
+    {
+        removeHeld (note);
+
+        auto& v = voices[0];
+        if (! (v.isActive() && v.currentNote() == note && v.isHeld()))
+            return;
+
+        if (numHeld > 0)
+        {
+            // Fall back to the most recent still-held note.
+            const auto& prev = heldStack[numHeld - 1];
+            if (engineParams.mode == VoiceMode::legato)
+                v.changeNote (prev.note, engineParams.glideSeconds);
+            else
+                v.startNote (prev.note, prev.velocity,
+                             engineParams.glideSeconds > 0.0f ? lastNoteHz : 0.0f,
+                             engineParams.glideSeconds);
+            lastNoteHz = FolieVoice::noteHz (prev.note);
+        }
+        else
+        {
+            v.setHeld (false);
+            v.stopNote (true);
         }
     }
 
@@ -145,7 +220,33 @@ private:
             v.renderNextBlock (buffer, start, num);
     }
 
+    void pushHeld (int note, float velocity)
+    {
+        removeHeld (note); // no duplicates
+        if (numHeld < maxHeld)
+            heldStack[numHeld++] = { note, velocity };
+    }
+
+    void removeHeld (int note)
+    {
+        for (int i = 0; i < numHeld; ++i)
+        {
+            if (heldStack[i].note == note)
+            {
+                for (int j = i; j < numHeld - 1; ++j)
+                    heldStack[j] = heldStack[j + 1];
+                --numHeld;
+                return;
+            }
+        }
+    }
+
+    struct HeldNote { int note = -1; float velocity = 0.0f; };
+    static constexpr int maxHeld = 32;
+
     FolieVoice voices[maxVoices];
     EngineParams engineParams;
+    HeldNote heldStack[maxHeld];
+    int numHeld = 0;
     float lastNoteHz = 0.0f;
 };

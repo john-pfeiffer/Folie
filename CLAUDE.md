@@ -29,6 +29,12 @@ COPY_PLUGIN_AFTER_BUILD does the copying. CI never sets this flag.
 
 ## Rules
 
+- **Zero post FX by design** (post-initial-build handoff): no chorus/delay/reverb —
+  ever. The in-loop saturator/damping filter and osc stereo width stay (sound
+  generation). The only bus stage is the fixed, parameterless safety soft-clip.
+- **Per-voice principle**: the feedback loop, its saturator, and all three envelopes
+  run per voice, never on the sum. No optimization may share them across voices.
+
 - Every parameter ID lives in `source/params/ParameterIDs.h` and is registered in
   `createParameterLayout()` — never inline parameter strings anywhere else.
 - All parameters are host-automatable APVTS parameters; plugin state is exactly the
