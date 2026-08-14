@@ -1,5 +1,4 @@
 #include "PluginEditor.h"
-#include "params/ParameterIDs.h"
 
 FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     : AudioProcessorEditor (p),
@@ -12,10 +11,17 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
       fbGain (p.apvts, ParamIDs::fbGain),
       fbKeytrack (p.apvts, ParamIDs::fbKeytrack),
       fbTune (p.apvts, ParamIDs::fbTune),
-      fbFilterMode (p.apvts, ParamIDs::fbFilterMode),
-      fbCutoff (p.apvts, ParamIDs::fbCutoff),
-      fbReso (p.apvts, ParamIDs::fbReso),
-      fbDrive (p.apvts, ParamIDs::fbDrive),
+      filterStrip (p, LoopModuleID::filter, "FILTER", ParamIDs::fxFilterOn,
+                   { ParamIDs::fbFilterMode, ParamIDs::fbCutoff, ParamIDs::fbReso }),
+      satStrip (p, LoopModuleID::saturator, "SATURATOR", ParamIDs::fxSatOn,
+                { ParamIDs::fxSatMode, ParamIDs::fbDrive }),
+      echoStrip (p, LoopModuleID::echo, "ECHO", ParamIDs::fxEchoOn,
+                 { ParamIDs::fxEchoSync, ParamIDs::fxEchoTime, ParamIDs::fxEchoAmt }),
+      diffStrip (p, LoopModuleID::diffuser, "DIFFUSER", ParamIDs::fxDiffOn,
+                 { ParamIDs::fxDiffSize, ParamIDs::fxDiffAmt }),
+      ringStrip (p, LoopModuleID::ringmod, "RING MOD", ParamIDs::fxRingOn,
+                 { ParamIDs::fxRingMode, ParamIDs::fxRingHz, ParamIDs::fxRingRatio,
+                   ParamIDs::fxRingMix }),
       attack (p.apvts, ParamIDs::env1Attack),
       decay (p.apvts, ParamIDs::env1Decay),
       sustain (p.apvts, ParamIDs::env1Sustain),
@@ -45,11 +51,10 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     loopSection.addItem (fbGain);
     loopSection.addItem (fbKeytrack);
     loopSection.addItem (fbTune);
-    loopSection.addItem (fbFilterMode);
-    loopSection.addItem (fbCutoff);
-    loopSection.addItem (fbReso);
-    loopSection.addItem (fbDrive);
     addAndMakeVisible (loopSection);
+
+    for (auto* strip : { &filterStrip, &satStrip, &echoStrip, &diffStrip, &ringStrip })
+        addAndMakeVisible (*strip);
 
     envSection.addItem (attack);
     envSection.addItem (decay);
@@ -77,6 +82,8 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     globalSection.addItem (master);
     addAndMakeVisible (globalSection);
 
+    processor.apvts.state.addListener (this);
+
     setResizable (true, true);
     setResizeLimits (900, 620, 1800, 1240);
 
@@ -84,13 +91,36 @@ FolieAudioProcessorEditor::FolieAudioProcessorEditor (FolieAudioProcessor& p)
     setSize (juce::jmax (900, saved.x), juce::jmax (620, saved.y));
 }
 
+FolieAudioProcessorEditor::~FolieAudioProcessorEditor()
+{
+    processor.apvts.state.removeListener (this);
+}
+
+ModuleStrip* FolieAudioProcessorEditor::stripFor (juce::uint8 moduleID)
+{
+    switch ((LoopModuleID) moduleID)
+    {
+        case LoopModuleID::filter:    return &filterStrip;
+        case LoopModuleID::saturator: return &satStrip;
+        case LoopModuleID::echo:      return &echoStrip;
+        case LoopModuleID::diffuser:  return &diffStrip;
+        case LoopModuleID::ringmod:   return &ringStrip;
+        default:                      return nullptr;
+    }
+}
+
 void FolieAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff141218));
     g.setColour (juce::Colours::white.withAlpha (0.9f));
     g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
-    g.drawText ("FOLIE", getLocalBounds().removeFromTop (36).reduced (12, 4),
+    g.drawText ("FOLIE", getLocalBounds().removeFromTop (32).reduced (12, 4),
                 juce::Justification::centredLeft);
+
+    g.setColour (juce::Colours::white.withAlpha (0.5f));
+    g.setFont (juce::FontOptions (12.0f));
+    g.drawText ("LOOP FX RACK  (< > moves a module through the loop)",
+                rackLabelArea, juce::Justification::centredLeft);
 }
 
 void FolieAudioProcessorEditor::resized()
@@ -98,13 +128,37 @@ void FolieAudioProcessorEditor::resized()
     processor.setSavedEditorSize (getWidth(), getHeight());
 
     auto area = getLocalBounds().reduced (8);
-    area.removeFromTop (32);
+    area.removeFromTop (28);
 
-    const int rowHeight = area.getHeight() / 4;
-    oscSection.setBounds (area.removeFromTop (rowHeight));
-    loopSection.setBounds (area.removeFromTop (rowHeight));
+    const int rowHeight = (area.getHeight() - 16) / 4;
 
-    // Three envelopes share one row: AMP (4 knobs) | FEEDBACK (5) | CUTOFF (5).
+    // Row 1: oscillator + loop core side by side.
+    auto row1 = area.removeFromTop (rowHeight);
+    oscSection.setBounds (row1.removeFromLeft (row1.getWidth() * 5 / 8));
+    loopSection.setBounds (row1);
+
+    // Row 2: the rack, in loopOrder order.
+    rackLabelArea = area.removeFromTop (16).reduced (4, 0);
+    auto rackRow = area.removeFromTop (rowHeight);
+    const auto order = processor.getLoopOrder();
+
+    // Widths proportional to knob counts (3,2,3,2,4 + header space).
+    int totalKnobs = 0;
+    for (auto m : order)
+        if (auto* s = stripFor (m))
+            totalKnobs += juce::jmax (2, s->knobCount());
+
+    for (auto m : order)
+    {
+        if (auto* s = stripFor (m))
+        {
+            const int w = rackRow.getWidth() * juce::jmax (2, s->knobCount()) / juce::jmax (1, totalKnobs);
+            s->setBounds (rackRow.removeFromLeft (w));
+            totalKnobs -= juce::jmax (2, s->knobCount());
+        }
+    }
+
+    // Row 3: envelopes.
     auto envRow = area.removeFromTop (rowHeight);
     envSection.setBounds (envRow.removeFromLeft (envRow.getWidth() * 4 / 14));
     env2Section.setBounds (envRow.removeFromLeft (envRow.getWidth() / 2));
