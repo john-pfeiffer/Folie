@@ -20,15 +20,17 @@ inline juce::String describeParam (const juce::String& id)
     if (id == oscOctave)   return "Coarse tune in octaves.";
 
     // Source
-    if (id == srcSawLevel)    return "Level of the saw stack feeding the voice and its feedback loop.";
-    if (id == srcNoiseLevel)  return "Noise into the voice and loop. Noise + high Feedback + a dark Loop Cutoff = plucked-string (Karplus-Strong) tones.";
+    if (id == srcSawLevel)    return "Level of the saw-stack CLICK that strikes the loop at note-on. The sources are the pluck; the feedback loop is the note.";
+    if (id == srcSineLevel)   return "A pure sine click at the note pitch - the cleanest possible strike.";
+    if (id == exciteCycles)   return "Click length in cycles of the played note (pitch-invariant strike character). Short = sharp pluck; long = a bowed push into the loop.";
+    if (id == srcNoiseLevel)  return "Noise burst in the click. Noise strike + high Feedback + a dark Loop Cutoff = the classic plucked-string tone.";
     if (id == srcNoiseType)   return "White = bright hiss. Pink = darker, more even across octaves.";
-    if (id == srcSampleLevel) return "Level of the loaded clip feeding the voice and loop. The clip is repitched to the note you play.";
+    if (id == srcSampleLevel) return "Level of the loaded clip striking the loop, repitched to the note you play. One-shot = a strike; Loop on = continuous bowing.";
     if (id == srcSampleRoot)  return "The note at which the clip plays back unchanged. Play above/below and it repitches accordingly.";
     if (id == srcSampleLoop)  return "On: the clip loops while the note holds. Off: it plays once per note (an exciter burst).";
 
     // Loop core
-    if (id == fbGain)     return "THE knob. How much of the loop feeds back into itself. Past ~90% it sings on its own; past 100% it's held on the edge by the in-loop saturation.";
+    if (id == fbGain)     return "THE knob - the note's sustain. Below 100% the ring decays naturally while held; at 100%+ it sings forever (saturation holds the edge). Key-up drops it via FB Release.";
     if (id == fbKeytrack) return "How much the loop tunes to the note you play. 100% = feedback screams in key; lower = detuned, metallic, dissonant.";
     if (id == fbTune)     return "Offsets the loop's resonance from the note, in semitones. +12 = octave-up screech, +7 = fifth drones.";
 
@@ -64,12 +66,12 @@ inline juce::String describeParam (const juce::String& id)
     // Envelopes
     if (id == env1Attack)  return "Amp fade-in time per note.";
     if (id == env1Decay)   return "Time from the attack peak down to the sustain level.";
-    if (id == env1Sustain) return "Held level while the key is down.";
+    if (id == env1Sustain) return "Held level while the key is down. Keep at 100% to hear the loop's own decay - the note's life is in the feedback, not this envelope.";
     if (id == env1Release) return "Fade-out after release. Feedback tails live inside this — long screams need long release.";
     if (id == env2Attack)  return "How fast the feedback boost arrives each note.";
     if (id == env2Decay)   return "How fast the feedback boost falls to its sustain.";
     if (id == env2Sustain) return "Feedback boost level while the key is held.";
-    if (id == env2Release) return "How the feedback boost lets go after release.";
+    if (id == env2Release) return "How fast the guardrails leave: after key-up the loop's feedback ramps away over this time - it IS the trail length (with damping).";
     if (id == env2Amount)  return "ADDS to the Feedback knob per note: feedback = knob + this envelope. Knob at 0 + amount up = feedback that only exists where the envelope puts it.";
     if (id == env3Attack)  return "How fast the loop-brightness sweep arrives each note.";
     if (id == env3Decay)   return "How fast the sweep falls to its sustain.";

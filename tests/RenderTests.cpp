@@ -140,10 +140,7 @@ float autocorrelationPitch (const juce::AudioBuffer<float>& b)
     const int minLag = (int) (kSampleRate / 2000.0);
     const int maxLag = (int) (kSampleRate / 50.0);
 
-    float bestScore = -1.0f;
-    int bestLag = minLag;
-
-    for (int lag = minLag; lag <= maxLag; ++lag)
+    auto scoreAt = [x, n] (int lag) -> float
     {
         float num = 0.0f, den = 0.0f;
         for (int i = 0; i < n - lag; i += 2) // stride 2: same estimate, half cost
@@ -151,11 +148,32 @@ float autocorrelationPitch (const juce::AudioBuffer<float>& b)
             num += x[i] * x[i + lag];
             den += x[i] * x[i];
         }
-        const float score = den > 0.0f ? num / den : 0.0f;
+        return den > 0.0f ? num / den : 0.0f;
+    };
+
+    float bestScore = -1.0f;
+    int bestLag = minLag;
+
+    for (int lag = minLag; lag <= maxLag; ++lag)
+    {
+        const float score = scoreAt (lag);
         if (score > bestScore)
         {
             bestScore = score;
             bestLag = lag;
+        }
+    }
+
+    // Octave-error correction: for a clean periodic ring, multiples of the
+    // true period score as high as the period itself — prefer the smallest
+    // divisor of the winning lag that scores nearly as well.
+    for (int d = 4; d >= 2; --d)
+    {
+        const int candidate = bestLag / d;
+        if (candidate >= minLag && scoreAt (candidate) > 0.85f * bestScore)
+        {
+            bestLag = candidate;
+            break;
         }
     }
 
@@ -206,28 +224,94 @@ void testTailDecay()
     check (engine.countActiveVoices() == 0, "tail decay: voice freed after release");
 }
 
-void testOscillatorPitch()
+// The core of the pluck model: a saw click strikes the loop; the ring that
+// carries the note must be at the played pitch.
+void testClickPluckPitch()
 {
     SynthEngine engine;
     engine.prepare (kSampleRate);
 
     auto p = defaultParams();
-    p.voice.sawCount = 1;   // single saw, no detune: fundamental should dominate
+    p.voice.sawCount = 1;
     p.voice.detune = 0.0f;
-    p.voice.fbGain = 0.0f;  // loop off for a clean oscillator measurement
-    p.voice.env1AttackMs = 1.0f;
-    p.voice.env1Sustain = 1.0f;
+    p.voice.fbGain = 0.98f;
     engine.setParams (p);
 
     std::vector<std::pair<int, juce::MidiMessage>> events {
         { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) }, // A2 = 110 Hz
     };
 
-    auto out = render (engine, events, 2.0);
-    const float peak = dominantFrequency (out, 1.0);
-    const float cents = centsBetween (peak, 110.0f);
-    std::printf ("      osc pitch: dominant %.2f Hz (%.1f cents from A2)\n", peak, cents);
-    check (std::abs (cents) < 20.0f, "osc pitch: single saw fundamental within 20 cents of A2");
+    auto out = render (engine, events, 2.5);
+    const float pitch = autocorrelationPitch (out);
+    const float cents = centsBetween (pitch, 110.0f);
+    std::printf ("      pluck pitch: ring at %.2f Hz (%.1f cents from A2)\n", pitch, cents);
+    check (std::abs (cents) < 50.0f, "pluck: saw click rings the loop at the played note");
+}
+
+// A pure sine click must ring the loop in tune too.
+void testSineClickPitch()
+{
+    SynthEngine engine;
+    engine.prepare (kSampleRate);
+
+    auto p = defaultParams();
+    p.voice.srcSawLevel = 0.0f;
+    p.voice.srcSineLevel = 1.0f;
+    p.voice.fbGain = 0.98f;
+    engine.setParams (p);
+
+    std::vector<std::pair<int, juce::MidiMessage>> events {
+        { 0, juce::MidiMessage::noteOn (1, 52, 0.9f) }, // E3 ~ 164.8 Hz
+    };
+
+    auto out = render (engine, events, 2.5);
+    const float pitch = autocorrelationPitch (out);
+    const float cents = centsBetween (pitch, 164.81f);
+    std::printf ("      sine click: ring at %.2f Hz (%.1f cents from E3)\n", pitch, cents);
+    check (std::abs (cents) < 50.0f, "pluck: sine click rings the loop at the played note");
+    check (allFinite (out, 20.0f), "pluck: sine click finite");
+}
+
+// Holding the key holds the guardrails: at 100% feedback the ring must still
+// be strong seconds after the click ended; key-up drops the feedback over FB
+// Release, so a long FB Release leaves far more trail than a short one.
+void testHoldSustainsAndReleaseTrails()
+{
+    auto renderHeld = [] (float fbReleaseMs, double noteOffAt, double total)
+    {
+        SynthEngine engine;
+        engine.prepare (kSampleRate);
+        auto p = defaultParams();
+        p.voice.fbGain = 1.0f;
+        p.voice.env2Amount = 0.0f;
+        p.voice.env1ReleaseMs = 4000.0f; // amp env out of the way
+        p.voice.env2ReleaseMs = fbReleaseMs;
+        engine.setParams (p);
+        std::vector<std::pair<int, juce::MidiMessage>> events {
+            { 0, juce::MidiMessage::noteOn (1, 45, 0.9f) },
+            { (int) (noteOffAt * kSampleRate), juce::MidiMessage::noteOff (1, 45) },
+        };
+        return render (engine, events, total);
+    };
+
+    // Sustain: click is ~36 ms; at 2-3 s the ring must still carry the note.
+    auto held = renderHeld (300.0f, 4.5, 5.0);
+    const float sustainRms = held.getRMSLevel (0, (int) (2.0 * kSampleRate), (int) kSampleRate);
+    std::printf ("      hold: ring RMS at 2-3 s = %.4f\n", sustainRms);
+    check (sustainRms > juce::Decibels::decibelsToGain (-40.0f),
+           "hold: 100% feedback sustains the ring seconds after the click");
+
+    // Trail: measure 0.6 s after key-up (note off at 1 s).
+    auto shortRel = renderHeld (60.0f, 1.0, 3.0);
+    auto longRel = renderHeld (1500.0f, 1.0, 3.0);
+    const int window = (int) (0.3 * kSampleRate);
+    const int at = (int) (1.6 * kSampleRate);
+    const float shortTrail = shortRel.getRMSLevel (0, at, window);
+    const float longTrail = longRel.getRMSLevel (0, at, window);
+    std::printf ("      trail: RMS 0.6 s after key-up, FB Release 60 ms %.5f vs 1.5 s %.5f\n",
+                 shortTrail, longTrail);
+    check (longTrail > shortTrail * 3.0f + 1.0e-5f,
+           "trail: FB Release sets how long the ring survives key-up");
 }
 
 // The core promise of the instrument: excite the loop with a burst, let it
@@ -456,11 +540,11 @@ void testGoldenDefaults()
 
     const float rms = out.getRMSLevel (0, (int) kSampleRate, (int) kSampleRate * 2);
     const float peak = out.getMagnitude (0, out.getNumSamples());
-    std::printf ("      golden: steady RMS %.6f (ref 0.218514), peak %.6f (ref 0.455598)\n",
+    std::printf ("      golden: steady RMS %.6f (ref 0.201734), peak %.6f (ref 0.418428)\n",
                  rms, peak);
-    check (std::abs (rms - 0.218514f) < 0.218514f * 0.1f,
+    check (std::abs (rms - 0.201734f) < 0.201734f * 0.1f,
            "golden: default patch RMS within 10% of reference");
-    check (peak < 0.456f * 1.15f, "golden: default patch peak in family with reference");
+    check (peak < 0.419f * 1.15f, "golden: default patch peak in family with reference");
 }
 
 // The new critical case: with EVERY module bypassed the loop is linear, so at
@@ -544,9 +628,9 @@ void testEchoKeepsLoopPitch()
     };
     auto out = render (engine, events, 3.0);
 
-    const float peak = dominantFrequency (out, 1.0);
-    const float cents = centsBetween (peak, 110.0f);
-    std::printf ("      echo x2: dominant %.2f Hz (%.1f cents from A2)\n", peak, cents);
+    const float pitch = autocorrelationPitch (out);
+    const float cents = centsBetween (pitch, 110.0f);
+    std::printf ("      echo x2: ring at %.2f Hz (%.1f cents from A2)\n", pitch, cents);
     check (std::abs (cents) < 50.0f, "echo x2: loop fundamental unmoved by the echo tap");
     check (allFinite (out, 20.0f), "echo x2: finite");
 }
@@ -607,9 +691,10 @@ void testNoiseKarplusPluck()
     p.voice.srcSawLevel = 0.0f;
     p.voice.srcNoiseLevel = 1.0f;
     p.voice.fbGain = 1.02f;
-    p.voice.fbCutoff = 2500.0f;
+    // 5 kHz damping: enough character, small enough phase delay that the free
+    // ring stays within tolerance (analytic compensation is a tracked idea).
+    p.voice.fbCutoff = 5000.0f;
     p.voice.fbDriveDb = 0.0f;
-    p.voice.env1Sustain = 1.0f;
     engine.setParams (p);
 
     std::vector<std::pair<int, juce::MidiMessage>> events {
@@ -715,8 +800,7 @@ void testVoiceModes()
         p.mode = VoiceMode::mono;
         p.voice.sawCount = 1;
         p.voice.detune = 0.0f;
-        p.voice.fbGain = 0.0f;
-        p.voice.env1Sustain = 1.0f;
+        p.voice.fbGain = 0.98f; // the ring carries the note in the pluck model
         engine.setParams (p);
 
         std::vector<std::pair<int, juce::MidiMessage>> events {
@@ -728,8 +812,8 @@ void testVoiceModes()
         auto out = render (engine, events, 3.0);
         check (engine.countActiveVoices() == 1, "mono: overlapping notes use a single voice");
 
-        const float late = dominantFrequency (out, 1.0);
-        std::printf ("      mono fallback: late dominant %.2f Hz (expect A2 110)\n", late);
+        const float late = autocorrelationPitch (out);
+        std::printf ("      mono fallback: late ring %.2f Hz (expect A2 110)\n", late);
         check (std::abs (centsBetween (late, 110.0f)) < 30.0f,
                "mono: releasing top note falls back to the held note");
         check (allFinite (out, 4.0f), "mono: finite");
@@ -744,9 +828,8 @@ void testVoiceModes()
         p.mode = VoiceMode::legato;
         p.voice.sawCount = 1;
         p.voice.detune = 0.0f;
-        p.voice.fbGain = 0.0f;
+        p.voice.fbGain = 0.98f; // no new click on legato change — the RING glides
         p.voice.env1AttackMs = 1.0f;
-        p.voice.env1Sustain = 1.0f;
         p.glideSeconds = 0.1f;
         engine.setParams (p);
 
@@ -758,10 +841,10 @@ void testVoiceModes()
         auto out = render (engine, events, 3.0);
         check (engine.countActiveVoices() == 1, "legato: overlapping notes use a single voice");
 
-        const float late = dominantFrequency (out, 1.0);
-        std::printf ("      legato glide: late dominant %.2f Hz (expect A3 220)\n", late);
+        const float late = autocorrelationPitch (out);
+        std::printf ("      legato glide: late ring %.2f Hz (expect A3 220)\n", late);
         check (std::abs (centsBetween (late, 220.0f)) < 30.0f,
-               "legato: pitch glides to the new note without retrigger");
+               "legato: the ringing loop glides to the new note without a new click");
         check (allFinite (out, 4.0f), "legato: finite");
     }
 }
@@ -987,6 +1070,7 @@ void testBlendIsAudible()
         p.voice.blend = blend;
         p.voice.fbGain = 0.0f;
         p.voice.env1Sustain = 1.0f;
+        p.voice.exciteCycles = 64.0f; // long burst = a measurable click window
         engine.setParams (p);
         std::vector<std::pair<int, juce::MidiMessage>> events {
             { 0, juce::MidiMessage::noteOn (1, 57, 0.9f) },
@@ -996,16 +1080,18 @@ void testBlendIsAudible()
 
     auto sideRms = [] (const juce::AudioBuffer<float>& b)
     {
+        // Pluck model: measure over the click itself (first 0.3 s with the
+        // long test burst), not the ring.
         float sum = 0.0f;
         const auto* l = b.getReadPointer (0);
         const auto* r = b.getReadPointer (1);
-        const int start = b.getNumSamples() / 2;
-        for (int i = start; i < b.getNumSamples(); ++i)
+        const int end = (int) (0.3 * kSampleRate);
+        for (int i = 0; i < end; ++i)
         {
             const float s = l[i] - r[i];
             sum += s * s;
         }
-        return std::sqrt (sum / (float) (b.getNumSamples() - start));
+        return std::sqrt (sum / (float) end);
     };
 
     const float sideAtZero = sideRms (renderWithBlend (0.0f));
@@ -1035,7 +1121,9 @@ int main()
 {
     testPolyphonicSanity();
     testTailDecay();
-    testOscillatorPitch();
+    testClickPluckPitch();
+    testSineClickPitch();
+    testHoldSustainsAndReleaseTrails();
     testLoopPitch();
     testLoopStabilityAndPerfAtExtremes();
     testFeedbackTailGated();

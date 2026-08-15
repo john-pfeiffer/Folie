@@ -22,6 +22,8 @@ inline constexpr auto fbDrive      = "fbDrive";
 
 // Source mixer
 inline constexpr auto srcSawLevel   = "srcSawLevel";
+inline constexpr auto srcSineLevel  = "srcSineLevel";
+inline constexpr auto exciteCycles  = "exciteCycles";
 inline constexpr auto srcNoiseLevel = "srcNoiseLevel";
 inline constexpr auto srcNoiseType  = "srcNoiseType";
 inline constexpr auto srcSampleLevel = "srcSampleLevel";

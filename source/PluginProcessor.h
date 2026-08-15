@@ -75,6 +75,8 @@ private:
         std::atomic<float>* width = nullptr;
         std::atomic<float>* octave = nullptr;
         std::atomic<float>* srcSawLevel = nullptr;
+        std::atomic<float>* srcSineLevel = nullptr;
+        std::atomic<float>* exciteCycles = nullptr;
         std::atomic<float>* srcNoiseLevel = nullptr;
         std::atomic<float>* srcNoiseType = nullptr;
         std::atomic<float>* srcSampleLevel = nullptr;

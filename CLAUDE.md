@@ -1,6 +1,10 @@
 # Folie
 
-Supersaw synth VST3/AU with per-voice tuned feedback loops (EVS plugin line).
+Feedback-loop instrument VST3/AU (EVS plugin line). **Pluck-only excitation: the
+sources (saw stack / sine / noise / sample) strike each voice's tuned loop as a
+short click — the feedback loop IS the note.** Holding a key holds the loop's
+feedback ("the guardrails"); releasing ramps it away over FB Release. There is
+no continuous-drone source path.
 Full product spec and architecture rationale: see the Folie handoff doc / Notion
 "Folie — Dev Tracker" database.
 

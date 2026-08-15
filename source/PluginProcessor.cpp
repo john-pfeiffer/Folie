@@ -14,6 +14,8 @@ FolieAudioProcessor::FolieAudioProcessor()
     raw.width     = apvts.getRawParameterValue (ParamIDs::oscWidth);
     raw.octave    = apvts.getRawParameterValue (ParamIDs::oscOctave);
     raw.srcSawLevel   = apvts.getRawParameterValue (ParamIDs::srcSawLevel);
+    raw.srcSineLevel  = apvts.getRawParameterValue (ParamIDs::srcSineLevel);
+    raw.exciteCycles  = apvts.getRawParameterValue (ParamIDs::exciteCycles);
     raw.srcNoiseLevel = apvts.getRawParameterValue (ParamIDs::srcNoiseLevel);
     raw.srcNoiseType  = apvts.getRawParameterValue (ParamIDs::srcNoiseType);
     raw.srcSampleLevel = apvts.getRawParameterValue (ParamIDs::srcSampleLevel);
@@ -70,6 +72,8 @@ EngineParams FolieAudioProcessor::gatherParams() const
     p.voice.width         = raw.width->load() * 0.01f;
     p.voice.octave        = (int) raw.octave->load();
     p.voice.srcSawLevel   = raw.srcSawLevel->load() * 0.01f;
+    p.voice.srcSineLevel  = raw.srcSineLevel->load() * 0.01f;
+    p.voice.exciteCycles  = raw.exciteCycles->load();
     p.voice.srcNoiseLevel = raw.srcNoiseLevel->load() * 0.01f;
     p.voice.srcNoisePink  = raw.srcNoiseType->load() > 0.5f;
     p.voice.srcSampleLevel = raw.srcSampleLevel->load() * 0.01f;

@@ -15,10 +15,13 @@ struct VoiceParams
     float width      = 0.8f;    // 0..1
     int   octave     = 0;       // -2..+2
 
-    // Source mixer
+    // Source mixer — ALL sources are click/exciter bursts (pluck-only model:
+    // the feedback loop is the note; the sources just strike it).
     float srcSawLevel   = 1.0f; // 0..1
+    float srcSineLevel  = 0.0f; // 0..1
     float srcNoiseLevel = 0.0f; // 0..1
     bool  srcNoisePink  = false;
+    float exciteCycles  = 4.0f; // click length in cycles of the note
     float srcSampleLevel = 0.0f; // 0..1
     int   srcSampleRoot  = 60;   // MIDI note the clip plays back unpitched at
     bool  srcSampleLoop  = false;
@@ -26,8 +29,9 @@ struct VoiceParams
     // its publish/retire scheme.
     const SampleData* sample = nullptr;
 
-    // Defaults mirror the parameter-layout defaults ("showcase" tuning).
-    float fbGain      = 0.75f;  // 0..1.1 — past 1.0 is "past the edge"
+    // Defaults mirror the parameter-layout defaults: a pluck that rings and
+    // decays naturally while held.
+    float fbGain      = 0.96f;  // 0..1.1 — past 1.0 is "past the edge"
     float fbKeytrack  = 1.0f;   // 0..1; 0 = loop pinned to fbBaseHz
     float fbTuneSemis = 0.0f;   // -24..+24
     bool  fbBandpass  = false;
@@ -53,19 +57,22 @@ struct VoiceParams
     float fxRingMix  = 0.5f;
     std::array<juce::uint8, numLoopModules> loopOrder { 0, 1, 2, 3, 4 };
 
+    // Amp env: sustain 100% by default — the note's decay comes from LOOP
+    // physics (fb < 100% + damping), not from this envelope; release long so
+    // the trail is audible.
     float env1AttackMs  = 5.0f;
     float env1DecayMs   = 200.0f;
-    float env1Sustain   = 0.8f; // 0..1
-    float env1ReleaseMs = 300.0f;
+    float env1Sustain   = 1.0f; // 0..1
+    float env1ReleaseMs = 1500.0f;
 
-    // ENV2 -> feedback gain, additive per spec: fbEff = fbGain + amt * env2.
-    // Defaults give every note a feedback bloom that settles (audible out of
-    // the box; peaks ~105% clamped, relaxes to ~85%).
+    // ENV2 -> feedback gain, additive: fbEff = (fbGain + amt * env2) * gate.
+    // Default: an attack bloom over the edge that settles back to the knob.
+    // env2Release also sets the guardrail-drop time after key-up.
     float env2AttackMs  = 5.0f;
     float env2DecayMs   = 400.0f;
-    float env2Sustain   = 0.35f;
+    float env2Sustain   = 0.0f;
     float env2ReleaseMs = 300.0f;
-    float env2Amount    = 0.3f; // 0..1
+    float env2Amount    = 0.15f; // 0..1
 
     // ENV3 -> loop cutoff: cutEff = fbCutoff * 2^(5 * amt * env3), amt bipolar.
     // The shift is strongest at the envelope PEAK: positive amount = note
@@ -111,6 +118,8 @@ public:
         loop.reset();
         note = -1;
         lastEnvLevel = 0.0f;
+        burstRemaining = 0.0;
+        fbGate.setCurrentAndTargetValue (0.0f);
         fbBaseSmoothed.setCurrentAndTargetValue (fbBaseSmoothed.getTargetValue());
     }
 
@@ -162,6 +171,17 @@ public:
 
         osc.noteOn (rng);
         samplePos = 0.0;
+        sinePhase = 0.0f;
+
+        // The click: sources fire for exciteCycles cycles of the note, then
+        // fall silent — everything after is the loop ringing.
+        const float f0 = target * std::exp2 ((float) params.octave);
+        burstTotal = burstRemaining = (double) params.exciteCycles * sr / (double) juce::jmax (20.0f, f0);
+
+        // Guardrails up: while the key is held, feedback stays at its set point.
+        fbGate.reset (sr, 0.0);
+        fbGate.setCurrentAndTargetValue (1.0f);
+
         env1.noteOn();
         env2.noteOn();
         env3.noteOn();
@@ -183,6 +203,11 @@ public:
     {
         if (allowTailOff)
         {
+            // Guardrails drop: the loop's feedback ramps away over FB Release,
+            // so the ring trails out at its own rate.
+            fbGate.reset (sr, (double) params.env2ReleaseMs * 0.001);
+            fbGate.setTargetValue (0.0f);
+
             env1.noteOff();
             env2.noteOff();
             env3.noteOff();
@@ -271,24 +296,49 @@ public:
                 loop.fx().filter.setCutoff (params.fbCutoff
                                             * std::exp2 (5.0f * params.env3Amount * env3Level));
 
+            const float sineInc = freq / (float) sr;
+
             for (int i = 0; i < n; ++i)
             {
-                float l, r;
-                osc.processSample (l, r);
-                l *= params.srcSawLevel;
-                r *= params.srcSawLevel;
+                float l = 0.0f, r = 0.0f;
 
-                // Mono noise into both channels BEFORE the loop's mono sum,
-                // so it excites the loop like the saws do (noise + high
-                // feedback + damping = the classic Karplus-Strong pluck).
-                // 0.4: rough loudness match against the normalized saw stack.
-                if (params.srcNoiseLevel > 0.0f)
+                // Sources render only inside the click burst; the fade keeps
+                // the click's end tuned instead of snapping.
+                if (burstRemaining > 0.0)
                 {
-                    const float nz = noise.process (params.srcNoisePink)
-                                     * params.srcNoiseLevel * 0.4f;
-                    l += nz;
-                    r += nz;
+                    osc.processSample (l, r);
+                    l *= params.srcSawLevel;
+                    r *= params.srcSawLevel;
+
+                    if (params.srcSineLevel > 0.0f)
+                    {
+                        const float sv = std::sin (juce::MathConstants<float>::twoPi * sinePhase)
+                                         * params.srcSineLevel * 0.7f;
+                        l += sv;
+                        r += sv;
+                    }
+
+                    if (params.srcNoiseLevel > 0.0f)
+                    {
+                        const float nz = noise.process (params.srcNoisePink)
+                                         * params.srcNoiseLevel * 0.4f;
+                        l += nz;
+                        r += nz;
+                    }
+
+                    const double fadeLen = juce::jmax (1.0, burstTotal * 0.3);
+                    if (burstRemaining < fadeLen)
+                    {
+                        const float w = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi
+                                                                * (float) (burstRemaining / fadeLen));
+                        l *= w;
+                        r *= w;
+                    }
+                    burstRemaining -= 1.0;
                 }
+                sinePhase += sineInc;
+                if (sinePhase >= 1.0f)
+                    sinePhase -= 1.0f;
 
                 // Sample exciter: mono into both channels pre-loop, like noise.
                 if (sampleActive)
@@ -308,12 +358,14 @@ public:
                     }
                 }
 
-                // ENV2 adds on top of the knob (spec: base + amount * ADSR),
-                // clamped to the knob's own 110% ceiling.
+                // ENV2 adds on top of the knob (base + amount * ADSR, clamped
+                // to the 110% ceiling), then the key gate scales it: held = 1
+                // (guardrails up), released = ramping to 0 over FB Release.
                 const float fbBase = fbBaseSmoothed.getNextValue();
                 const float env2Sample = env2.getNextSample();
                 const float fbEff = juce::jlimit (
-                    0.0f, 1.1f, fbBase + params.env2Amount * env2Sample);
+                                        0.0f, 1.1f, fbBase + params.env2Amount * env2Sample)
+                                    * fbGate.getNextValue();
                 env3Level = env3.getNextSample();
 
                 // The loop runs on the mono sum; its return is added equally
@@ -359,6 +411,9 @@ private:
 
     VoiceParams params;
     double samplePos = 0.0;
+    double burstRemaining = 0.0, burstTotal = 0.0;
+    float sinePhase = 0.0f;
+    juce::SmoothedValue<float> fbGate { 0.0f };
     int note = -1;
     bool heldDown = false;
     float level = 0.0f;

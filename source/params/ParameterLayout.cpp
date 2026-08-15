@@ -86,7 +86,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
             // The star knob. >100% is intentional: tanh in the loop self-limits.
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbGain, 1 }, "Feedback",
                                    juce::NormalisableRange<float> { 0.0f, 110.0f, 0.0f, 0.7f },
-                                   75.0f, percentAttributes()),
+                                   96.0f, percentAttributes()),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbKeytrack, 1 }, "Key Track",
                                    percentRange(), 100.0f, percentAttributes()),
             std::make_unique<APF> (juce::ParameterID { ParamIDs::fbTune, 1 }, "Loop Tune",
@@ -117,6 +117,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     src->addChild (
         std::make_unique<APF> (juce::ParameterID { ParamIDs::srcSawLevel, 2 }, "Saw Level",
                                percentRange(), 100.0f, percentAttributes()),
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::srcSineLevel, 2 }, "Sine Level",
+                               percentRange(), 0.0f, percentAttributes()),
+        // Click length in cycles of the played note: pitch-invariant strike
+        // character, like a real plucked string.
+        std::make_unique<APF> (juce::ParameterID { ParamIDs::exciteCycles, 2 }, "Click Len",
+                               juce::NormalisableRange<float> { 0.25f, 64.0f, 0.0f, 0.4f }, 4.0f,
+                               juce::AudioParameterFloatAttributes{}
+                                   .withLabel ("cyc")
+                                   .withStringFromValueFunction ([] (float v, int)
+                                   { return juce::String (v, 1) + " cyc"; })),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::srcNoiseLevel, 2 }, "Noise Level",
                                percentRange(), 0.0f, percentAttributes()),
         std::make_unique<juce::AudioParameterChoice> (
@@ -187,9 +197,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env1Decay, 1 }, "Amp Decay",
                                envTimeRange(), 200.0f, msAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env1Sustain, 1 }, "Amp Sustain",
-                               percentRange(), 80.0f, percentAttributes()),
+                               percentRange(), 100.0f, percentAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env1Release, 1 }, "Amp Release",
-                               envTimeRange(), 300.0f, msAttributes()));
+                               envTimeRange(), 1500.0f, msAttributes()));
 
     auto env2 = std::make_unique<Group> ("env2", "Feedback Envelope", "|");
     env2->addChild (
@@ -198,12 +208,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Decay, 1 }, "FB Decay",
                                envTimeRange(), 400.0f, msAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Sustain, 1 }, "FB Sustain",
-                               percentRange(), 35.0f, percentAttributes()),
+                               percentRange(), 0.0f, percentAttributes()),
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Release, 1 }, "FB Release",
                                envTimeRange(), 300.0f, msAttributes()),
         // 0% = feedback stays at the knob; 100% = fully shaped by this ADSR.
         std::make_unique<APF> (juce::ParameterID { ParamIDs::env2Amount, 1 }, "FB Env Amt",
-                               percentRange(), 30.0f, percentAttributes()));
+                               percentRange(), 15.0f, percentAttributes()));
 
     auto env3 = std::make_unique<Group> ("env3", "Loop Filter Envelope", "|");
     env3->addChild (

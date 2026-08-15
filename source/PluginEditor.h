@@ -54,8 +54,11 @@ private:
     SectionPanel oscSection { "OSCILLATOR" };
     Knob sawCount, detune, blend, width, octave;
 
-    SectionPanel sourceSection { "SOURCE" };
-    Knob sawLevel, noiseLevel, noiseType, sampleLevel, sampleRoot, sampleLoop;
+    SectionPanel sourceSection { "CLICK SOURCES" };
+    Knob sawLevel, sineLevel, noiseLevel, noiseType, clickLen;
+
+    SectionPanel sampleSection { "SAMPLE CLICK" };
+    Knob sampleLevel, sampleRoot, sampleLoop;
     SampleLoader sampleLoader;
 
     SectionPanel loopSection { "FEEDBACK LOOP" };
